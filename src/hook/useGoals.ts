@@ -1,27 +1,11 @@
-import {
-  useEffect,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { notifyError, notifySuccess } from '../lib/toast';
 
-import {
-  useAuth,
-} from '../contexts/AuthContext';
-
-import {
-  notifyError,
-  notifySuccess,
-} from '../lib/toast';
-
-import type {
-  Goal,
-  GoalPriority,
-} from '../types/goal';
-
-import type {
-  GoalContribution,
-} from '../types/goalContribution';
+import type { Goal, GoalPriority } from '../types/goal';
+import type { GoalContribution } from '../types/goalContribution';
 
 type SupabaseGoal = {
   id: number;
@@ -43,24 +27,73 @@ type SupabaseGoalContribution = {
   user_id: string;
 };
 
-function mapGoalFromSupabase(
-  goal: SupabaseGoal,
-): Goal {
+type GoalInput = Omit<Goal, 'id'>;
+
+type UpdateGoalInput = {
+  id: number;
+  title: string;
+  targetAmount: number;
+  deadline?: string | null;
+  priority: GoalPriority;
+  isPrimary: boolean;
+};
+
+type GoalContributionInput = {
+  goalId: number;
+  amount: number;
+  note?: string | null;
+  date: string;
+};
+
+type UpdateGoalContributionInput = {
+  id: number;
+  amount: number;
+  note?: string | null;
+  date: string;
+};
+
+const MIN_LOADING_TIME = 350;
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
+function sortGoals(goals: Goal[]) {
+  return [...goals].sort((first, second) => {
+    if (first.isPrimary && !second.isPrimary) {
+      return -1;
+    }
+
+    if (!first.isPrimary && second.isPrimary) {
+      return 1;
+    }
+
+    return second.id - first.id;
+  });
+}
+
+function sortContributions(contributions: GoalContribution[]) {
+  return [...contributions].sort((first, second) => {
+    const dateDiff = new Date(second.date).getTime() - new Date(first.date).getTime();
+
+    if (dateDiff !== 0) {
+      return dateDiff;
+    }
+
+    return second.id - first.id;
+  });
+}
+
+function mapGoalFromSupabase(goal: SupabaseGoal): Goal {
   return {
     id: goal.id,
-
     title: goal.title,
-
-    targetAmount:
-      Number(goal.target_amount),
-
-    currentAmount:
-      Number(goal.current_amount),
-
+    targetAmount: Number(goal.target_amount),
+    currentAmount: Number(goal.current_amount),
     deadline: goal.deadline,
-
     priority: goal.priority,
-
     isPrimary: goal.is_primary,
   };
 }
@@ -70,35 +103,70 @@ function mapContributionFromSupabase(
 ): GoalContribution {
   return {
     id: contribution.id,
-
     goalId: contribution.goal_id,
-
-    amount: Number(
-      contribution.amount,
-    ),
-
+    amount: Number(contribution.amount),
     note: contribution.note,
-
     date: contribution.date,
   };
 }
 
+function mapGoalToSupabase(goal: GoalInput, userId: string) {
+  return {
+    title: goal.title.trim(),
+    target_amount: goal.targetAmount,
+    current_amount: goal.currentAmount,
+    deadline: goal.deadline || null,
+    priority: goal.priority,
+    is_primary: goal.isPrimary,
+    user_id: userId,
+  };
+}
+
+function mapGoalUpdateToSupabase(goal: UpdateGoalInput) {
+  return {
+    title: goal.title.trim(),
+    target_amount: goal.targetAmount,
+    deadline: goal.deadline || null,
+    priority: goal.priority,
+    is_primary: goal.isPrimary,
+  };
+}
+
+function mapContributionToSupabase(
+  contribution: GoalContributionInput,
+  userId: string,
+) {
+  return {
+    goal_id: contribution.goalId,
+    user_id: userId,
+    amount: contribution.amount,
+    note: contribution.note || null,
+    date: contribution.date,
+  };
+}
+
+function getTotalGoalAmount(contributions: { amount: number }[]) {
+  return contributions.reduce((total, contribution) => {
+    return total + Number(contribution.amount);
+  }, 0);
+}
+
 export function useGoals() {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
 
-  const [goals, setGoals] =
-    useState<Goal[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [contributions, setContributions] = useState<GoalContribution[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [
-    contributions,
-    setContributions,
-  ] = useState<GoalContribution[]>([]);
+  const handleError = useCallback((message: string) => {
+    setError(message);
+    notifyError(message);
+  }, []);
 
-  const [isLoading, setIsLoading] =
-    useState(true);
-
-  async function fetchGoals() {
-    if (!user) {
+  const fetchGoals = useCallback(async () => {
+    if (!userId) {
       setGoals([]);
       setContributions([]);
       setIsLoading(false);
@@ -106,494 +174,473 @@ export function useGoals() {
     }
 
     setIsLoading(true);
+    setError(null);
 
-    const {
-      data: goalsData,
-      error: goalsError,
-    } = await supabase
+    const loadingStart = Date.now();
+
+    const { data: goalsData, error: goalsError } = await supabase
       .from('goals')
       .select('*')
-      .eq('user_id', user.id)
-      .order('id', {
-        ascending: false,
-      });
+      .eq('user_id', userId)
+      .order('is_primary', { ascending: false })
+      .order('id', { ascending: false });
 
     if (goalsError) {
-      notifyError(goalsError.message);
+      handleError(goalsError.message);
+      setGoals([]);
+      setContributions([]);
       setIsLoading(false);
       return;
     }
 
-    const {
-      data: contributionsData,
-      error: contributionsError,
-    } = await supabase
+    const { data: contributionsData, error: contributionsError } = await supabase
       .from('goal_contributions')
       .select('*')
-      .eq('user_id', user.id)
-      .order('date', {
-        ascending: false,
-      })
-      .order('id', {
-        ascending: false,
-      });
+      .eq('user_id', userId)
+      .order('date', { ascending: false })
+      .order('id', { ascending: false });
+
+    const elapsed = Date.now() - loadingStart;
+
+    if (elapsed < MIN_LOADING_TIME) {
+      await wait(MIN_LOADING_TIME - elapsed);
+    }
 
     if (contributionsError) {
-      notifyError(
-        contributionsError.message,
-      );
+      handleError(contributionsError.message);
+      setGoals([]);
+      setContributions([]);
       setIsLoading(false);
       return;
     }
 
-    setGoals(
-      (goalsData ?? []).map(
-        mapGoalFromSupabase,
-      ),
+    const mappedGoals = (goalsData ?? []).map((goal) =>
+      mapGoalFromSupabase(goal as SupabaseGoal),
     );
 
-    setContributions(
-      (contributionsData ?? []).map(
-        mapContributionFromSupabase,
-      ),
+    const mappedContributions = (contributionsData ?? []).map((contribution) =>
+      mapContributionFromSupabase(contribution as SupabaseGoalContribution),
     );
 
+    setGoals(sortGoals(mappedGoals));
+    setContributions(sortContributions(mappedContributions));
     setIsLoading(false);
-  }
+  }, [userId, handleError]);
 
   useEffect(() => {
-    fetchGoals();
-  }, [user?.id]);
+    void fetchGoals();
+  }, [fetchGoals]);
 
-  async function recalculateGoalAmount(
-    goalId: number,
-  ) {
-    if (!user) return null;
+  const resetPrimaryGoals = useCallback(
+    async (exceptGoalId?: number) => {
+      if (!userId) {
+        return false;
+      }
 
-    const { data, error } =
-      await supabase
+      let query = supabase
+        .from('goals')
+        .update({ is_primary: false })
+        .eq('user_id', userId);
+
+      if (exceptGoalId) {
+        query = query.neq('id', exceptGoalId);
+      }
+
+      const { error: resetError } = await query;
+
+      if (resetError) {
+        handleError(resetError.message);
+        return false;
+      }
+
+      setGoals((currentGoals) =>
+        currentGoals.map((goal) =>
+          exceptGoalId && goal.id === exceptGoalId
+            ? goal
+            : {
+                ...goal,
+                isPrimary: false,
+              },
+        ),
+      );
+
+      return true;
+    },
+    [userId, handleError],
+  );
+
+  const recalculateGoalAmount = useCallback(
+    async (goalId: number): Promise<Goal | null> => {
+      if (!userId) {
+        handleError('Usuário não autenticado.');
+        return null;
+      }
+
+      const { data, error: contributionsError } = await supabase
         .from('goal_contributions')
         .select('amount')
         .eq('goal_id', goalId)
-        .eq('user_id', user.id);
+        .eq('user_id', userId);
 
-    if (error) {
-      notifyError(error.message);
-      return null;
-    }
-
-    const newCurrentAmount =
-      (data ?? []).reduce(
-        (acc, item) =>
-          acc + Number(item.amount),
-        0,
-      );
-
-    const {
-      data: goalData,
-      error: goalError,
-    } = await supabase
-      .from('goals')
-      .update({
-        current_amount:
-          newCurrentAmount,
-      })
-      .eq('id', goalId)
-      .eq('user_id', user.id)
-      .select()
-      .single();
-
-    if (goalError) {
-      notifyError(goalError.message);
-      return null;
-    }
-
-    const mappedGoal =
-      mapGoalFromSupabase(goalData);
-
-    setGoals((prev) =>
-      prev.map((goal) =>
-        goal.id === goalId
-          ? mappedGoal
-          : goal,
-      ),
-    );
-
-    return mappedGoal;
-  }
-
-  async function addGoal(
-    goal: Omit<Goal, 'id'>,
-  ) {
-    if (!user) return;
-
-    if (goal.isPrimary) {
-      const { error: resetError } =
-        await supabase
-          .from('goals')
-          .update({
-            is_primary: false,
-          })
-          .eq('user_id', user.id);
-
-      if (resetError) {
-        notifyError(resetError.message);
-        return;
+      if (contributionsError) {
+        handleError(contributionsError.message);
+        return null;
       }
-    }
 
-    const { error } = await supabase
-      .from('goals')
-      .insert({
-        title: goal.title,
+      const newCurrentAmount = getTotalGoalAmount(data ?? []);
 
-        target_amount:
-          goal.targetAmount,
-
-        current_amount:
-          goal.currentAmount,
-
-        deadline:
-          goal.deadline,
-
-        priority:
-          goal.priority,
-
-        is_primary:
-          goal.isPrimary,
-
-        user_id: user.id,
-      });
-
-    if (error) {
-      notifyError(error.message);
-      return;
-    }
-
-    await fetchGoals();
-
-    notifySuccess(
-      'Meta criada com sucesso!',
-    );
-  }
-
-  async function updateGoal({
-    id,
-    title,
-    targetAmount,
-    deadline,
-    priority,
-    isPrimary,
-  }: {
-    id: number;
-    title: string;
-    targetAmount: number;
-    deadline?: string | null;
-    priority: GoalPriority;
-    isPrimary: boolean;
-  }) {
-    if (!user) return;
-
-    if (isPrimary) {
-      const { error: resetError } =
-        await supabase
-          .from('goals')
-          .update({
-            is_primary: false,
-          })
-          .eq('user_id', user.id)
-          .neq('id', id);
-
-      if (resetError) {
-        notifyError(resetError.message);
-        return;
-      }
-    }
-
-    const { data, error } =
-      await supabase
+      const { data: goalData, error: goalError } = await supabase
         .from('goals')
         .update({
-          title,
-
-          target_amount:
-            targetAmount,
-
-          deadline:
-            deadline || null,
-
-          priority,
-
-          is_primary:
-            isPrimary,
+          current_amount: newCurrentAmount,
         })
-        .eq('id', id)
-        .eq('user_id', user.id)
+        .eq('id', goalId)
+        .eq('user_id', userId)
         .select()
         .single();
 
-    if (error) {
-      notifyError(error.message);
-      return;
-    }
+      if (goalError) {
+        handleError(goalError.message);
+        return null;
+      }
 
-    setGoals((prev) =>
-      prev.map((goal) =>
-        goal.id === id
-          ? mapGoalFromSupabase(data)
-          : goal,
-      ),
-    );
+      const mappedGoal = mapGoalFromSupabase(goalData as SupabaseGoal);
 
-    await fetchGoals();
-
-    notifySuccess(
-      'Meta atualizada com sucesso!',
-    );
-  }
-
-  async function addGoalContribution({
-    goalId,
-    amount,
-    note,
-    date,
-  }: {
-    goalId: number;
-    amount: number;
-    note?: string | null;
-    date: string;
-  }) {
-    if (!user) return;
-
-    const goal =
-      goals.find(
-        (item) =>
-          item.id === goalId,
+      setGoals((currentGoals) =>
+        sortGoals(
+          currentGoals.map((goal) =>
+            goal.id === goalId ? mappedGoal : goal,
+          ),
+        ),
       );
 
-    if (!goal) {
-      notifyError(
-        'Meta não encontrada.',
-      );
-      return;
-    }
+      return mappedGoal;
+    },
+    [userId, handleError],
+  );
 
-    const {
-      data: contributionData,
-      error: contributionError,
-    } = await supabase
-      .from('goal_contributions')
-      .insert({
-        goal_id: goalId,
-        user_id: user.id,
-        amount,
-        note: note || null,
-        date,
-      })
-      .select()
-      .single();
+  const addGoal = useCallback(
+    async (goal: GoalInput): Promise<Goal | null> => {
+      if (!userId) {
+        handleError('Usuário não autenticado.');
+        return null;
+      }
 
-    if (contributionError) {
-      notifyError(
-        contributionError.message,
-      );
-      return;
-    }
+      if (!goal.title.trim()) {
+        handleError('Informe um título para a meta.');
+        return null;
+      }
 
-    setContributions((prev) => [
-      mapContributionFromSupabase(
-        contributionData,
-      ),
-      ...prev,
-    ]);
+      if (goal.targetAmount <= 0) {
+        handleError('Informe um valor válido para a meta.');
+        return null;
+      }
 
-    await recalculateGoalAmount(goalId);
+      if (goal.isPrimary) {
+        const resetSuccessful = await resetPrimaryGoals();
 
-    notifySuccess(
-      'Aporte registrado com sucesso!',
-    );
-  }
+        if (!resetSuccessful) {
+          return null;
+        }
+      }
 
-  async function updateGoalContribution({
-    id,
-    amount,
-    note,
-    date,
-  }: {
-    id: number;
-    amount: number;
-    note?: string | null;
-    date: string;
-  }) {
-    if (!user) return;
+      const { data, error: insertError } = await supabase
+        .from('goals')
+        .insert(mapGoalToSupabase(goal, userId))
+        .select()
+        .single();
 
-    const contribution =
-      contributions.find(
-        (item) =>
-          item.id === id,
-      );
+      if (insertError) {
+        handleError(insertError.message);
+        return null;
+      }
 
-    if (!contribution) {
-      notifyError(
-        'Aporte não encontrado.',
-      );
-      return;
-    }
+      const createdGoal = mapGoalFromSupabase(data as SupabaseGoal);
 
-    const {
-      data: contributionData,
-      error,
-    } = await supabase
-      .from('goal_contributions')
-      .update({
-        amount,
-        note: note || null,
-        date,
-      })
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .select()
-      .single();
+      setGoals((currentGoals) => sortGoals([createdGoal, ...currentGoals]));
 
-    if (error) {
-      notifyError(error.message);
-      return;
-    }
+      notifySuccess('Meta criada com sucesso!');
 
-    const mappedContribution =
-      mapContributionFromSupabase(
-        contributionData,
-      );
+      return createdGoal;
+    },
+    [userId, handleError, resetPrimaryGoals],
+  );
 
-    setContributions((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? mappedContribution
-          : item,
-      ),
-    );
+  const updateGoal = useCallback(
+    async (goal: UpdateGoalInput): Promise<Goal | null> => {
+      if (!userId) {
+        handleError('Usuário não autenticado.');
+        return null;
+      }
 
-    await recalculateGoalAmount(
-      contribution.goalId,
-    );
+      if (!goal.title.trim()) {
+        handleError('Informe um título para a meta.');
+        return null;
+      }
 
-    notifySuccess(
-      'Aporte atualizado com sucesso!',
-    );
-  }
+      if (goal.targetAmount <= 0) {
+        handleError('Informe um valor válido para a meta.');
+        return null;
+      }
 
-  async function removeGoalContribution(
-    contributionId: number,
-  ) {
-    if (!user) return;
+      if (goal.isPrimary) {
+        const resetSuccessful = await resetPrimaryGoals(goal.id);
 
-    const contribution =
-      contributions.find(
-        (item) =>
-          item.id === contributionId,
+        if (!resetSuccessful) {
+          return null;
+        }
+      }
+
+      const { data, error: updateError } = await supabase
+        .from('goals')
+        .update(mapGoalUpdateToSupabase(goal))
+        .eq('id', goal.id)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (updateError) {
+        handleError(updateError.message);
+        return null;
+      }
+
+      const updatedGoal = mapGoalFromSupabase(data as SupabaseGoal);
+
+      setGoals((currentGoals) =>
+        sortGoals(
+          currentGoals.map((currentGoal) =>
+            currentGoal.id === goal.id ? updatedGoal : currentGoal,
+          ),
+        ),
       );
 
-    if (!contribution) {
-      notifyError(
-        'Aporte não encontrado.',
-      );
-      return;
-    }
+      notifySuccess('Meta atualizada com sucesso!');
 
-    const { error: deleteError } =
-      await supabase
+      return updatedGoal;
+    },
+    [userId, handleError, resetPrimaryGoals],
+  );
+
+  const addGoalContribution = useCallback(
+    async (contribution: GoalContributionInput): Promise<GoalContribution | null> => {
+      if (!userId) {
+        handleError('Usuário não autenticado.');
+        return null;
+      }
+
+      if (contribution.amount <= 0) {
+        handleError('Informe um valor válido para o aporte.');
+        return null;
+      }
+
+      const goalExists = goals.some((goal) => goal.id === contribution.goalId);
+
+      if (!goalExists) {
+        handleError('Meta não encontrada.');
+        return null;
+      }
+
+      const { data, error: insertError } = await supabase
+        .from('goal_contributions')
+        .insert(mapContributionToSupabase(contribution, userId))
+        .select()
+        .single();
+
+      if (insertError) {
+        handleError(insertError.message);
+        return null;
+      }
+
+      const createdContribution = mapContributionFromSupabase(
+        data as SupabaseGoalContribution,
+      );
+
+      setContributions((currentContributions) =>
+        sortContributions([createdContribution, ...currentContributions]),
+      );
+
+      await recalculateGoalAmount(contribution.goalId);
+
+      notifySuccess('Aporte registrado com sucesso!');
+
+      return createdContribution;
+    },
+    [userId, goals, handleError, recalculateGoalAmount],
+  );
+
+  const updateGoalContribution = useCallback(
+    async ({
+      id,
+      amount,
+      note,
+      date,
+    }: UpdateGoalContributionInput): Promise<GoalContribution | null> => {
+      if (!userId) {
+        handleError('Usuário não autenticado.');
+        return null;
+      }
+
+      if (amount <= 0) {
+        handleError('Informe um valor válido para o aporte.');
+        return null;
+      }
+
+      const existingContribution = contributions.find(
+        (contribution) => contribution.id === id,
+      );
+
+      if (!existingContribution) {
+        handleError('Aporte não encontrado.');
+        return null;
+      }
+
+      const { data, error: updateError } = await supabase
+        .from('goal_contributions')
+        .update({
+          amount,
+          note: note || null,
+          date,
+        })
+        .eq('id', id)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (updateError) {
+        handleError(updateError.message);
+        return null;
+      }
+
+      const updatedContribution = mapContributionFromSupabase(
+        data as SupabaseGoalContribution,
+      );
+
+      setContributions((currentContributions) =>
+        sortContributions(
+          currentContributions.map((contribution) =>
+            contribution.id === id ? updatedContribution : contribution,
+          ),
+        ),
+      );
+
+      await recalculateGoalAmount(existingContribution.goalId);
+
+      notifySuccess('Aporte atualizado com sucesso!');
+
+      return updatedContribution;
+    },
+    [userId, contributions, handleError, recalculateGoalAmount],
+  );
+
+  const removeGoalContribution = useCallback(
+    async (contributionId: number): Promise<boolean> => {
+      if (!userId) {
+        handleError('Usuário não autenticado.');
+        return false;
+      }
+
+      const contribution = contributions.find((item) => item.id === contributionId);
+
+      if (!contribution) {
+        handleError('Aporte não encontrado.');
+        return false;
+      }
+
+      const { error: deleteError } = await supabase
         .from('goal_contributions')
         .delete()
         .eq('id', contributionId)
-        .eq('user_id', user.id);
+        .eq('user_id', userId);
 
-    if (deleteError) {
-      notifyError(deleteError.message);
-      return;
-    }
+      if (deleteError) {
+        handleError(deleteError.message);
+        return false;
+      }
 
-    setContributions((prev) =>
-      prev.filter(
-        (item) =>
-          item.id !== contributionId,
-      ),
-    );
+      setContributions((currentContributions) =>
+        currentContributions.filter((item) => item.id !== contributionId),
+      );
 
-    await recalculateGoalAmount(
-      contribution.goalId,
-    );
+      await recalculateGoalAmount(contribution.goalId);
 
-    notifySuccess(
-      'Aporte removido.',
-    );
-  }
+      notifySuccess('Aporte removido.');
 
-  async function removeGoal(
-    id: number,
-  ) {
-    if (!user) return;
+      return true;
+    },
+    [userId, contributions, handleError, recalculateGoalAmount],
+  );
 
-    const { error } =
-      await supabase
+  const removeGoal = useCallback(
+    async (id: number): Promise<boolean> => {
+      if (!userId) {
+        handleError('Usuário não autenticado.');
+        return false;
+      }
+
+      const { error: deleteError } = await supabase
         .from('goals')
         .delete()
         .eq('id', id)
-        .eq('user_id', user.id);
+        .eq('user_id', userId);
 
-    if (error) {
-      notifyError(error.message);
-      return;
-    }
+      if (deleteError) {
+        handleError(deleteError.message);
+        return false;
+      }
 
-    setGoals((prev) =>
-      prev.filter(
-        (goal) =>
-          goal.id !== id,
-      ),
-    );
+      setGoals((currentGoals) => currentGoals.filter((goal) => goal.id !== id));
 
-    setContributions((prev) =>
-      prev.filter(
-        (item) =>
-          item.goalId !== id,
-      ),
-    );
+      setContributions((currentContributions) =>
+        currentContributions.filter((contribution) => contribution.goalId !== id),
+      );
 
-    notifySuccess(
-      'Meta removida.',
-    );
-  }
+      notifySuccess('Meta removida.');
 
-  function getGoalContributions(
-    goalId: number,
-  ) {
-    return contributions.filter(
-      (item) =>
-        item.goalId === goalId,
-    );
-  }
+      return true;
+    },
+    [userId, handleError],
+  );
+
+  const getGoalContributions = useCallback(
+    (goalId: number) => {
+      return contributions.filter((contribution) => contribution.goalId === goalId);
+    },
+    [contributions],
+  );
+
+  const primaryGoal = useMemo(() => {
+    return goals.find((goal) => goal.isPrimary) ?? goals[0] ?? null;
+  }, [goals]);
+
+  const totalGoalsCurrentAmount = useMemo(() => {
+    return goals.reduce((total, goal) => total + goal.currentAmount, 0);
+  }, [goals]);
+
+  const totalGoalsTargetAmount = useMemo(() => {
+    return goals.reduce((total, goal) => total + goal.targetAmount, 0);
+  }, [goals]);
+
+  const goalsProgress =
+    totalGoalsTargetAmount > 0
+      ? Math.min((totalGoalsCurrentAmount / totalGoalsTargetAmount) * 100, 100)
+      : 0;
 
   return {
     goals,
-
     contributions,
-
+    primaryGoal,
+    totalGoalsCurrentAmount,
+    totalGoalsTargetAmount,
+    goalsProgress,
     isLoading,
-
+    error,
     fetchGoals,
-
     addGoal,
-
     updateGoal,
-
     addGoalContribution,
-
     updateGoalContribution,
-
     removeGoalContribution,
-
     removeGoal,
-
     getGoalContributions,
   };
 }

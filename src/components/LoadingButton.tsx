@@ -1,36 +1,31 @@
-import type {
-  ButtonHTMLAttributes,
-  ReactNode,
-} from 'react';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
-type Props =
-  ButtonHTMLAttributes<HTMLButtonElement> & {
-    isLoading?: boolean;
-    children: ReactNode;
-  };
+type LoadingButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  isLoading?: boolean;
+  children: ReactNode;
+};
 
 export default function LoadingButton({
   isLoading = false,
   children,
-  disabled,
+  disabled = false,
   className = '',
+  type = 'button',
   ...props
-}: Props) {
+}: LoadingButtonProps) {
+  const isDisabled = disabled || isLoading;
+
   return (
     <button
       {...props}
-      className={`${className} ${
-        isLoading ? 'is-loading' : ''
-      }`}
-      disabled={disabled || isLoading}
+      type={type}
+      className={`${className} ${isLoading ? 'is-loading' : ''}`.trim()}
+      disabled={isDisabled}
+      aria-busy={isLoading}
     >
-      {isLoading && (
-        <span className="button-spinner" />
-      )}
+      {isLoading && <span className="button-spinner" aria-hidden="true" />}
 
-      <span className="button-label">
-        {children}
-      </span>
+      <span className="button-label">{children}</span>
     </button>
   );
 }

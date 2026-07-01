@@ -1,11 +1,9 @@
 import {
-  CalendarCheck,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
   Receipt,
   Target,
-  Upload,
 } from 'lucide-react';
 
 import type { LucideIcon } from 'lucide-react';
@@ -34,19 +32,9 @@ const menuItems: MenuItem[] = [
     path: '/dashboard',
   },
   {
-    label: 'Planejamento Mensal',
-    icon: CalendarCheck,
-    path: '/monthly-plan',
-  },
-  {
     label: 'Transações',
     icon: Receipt,
     path: '/transactions',
-  },
-  {
-    label: 'Importações',
-    icon: Upload,
-    path: '/imports',
   },
   {
     label: 'Metas',
@@ -89,11 +77,19 @@ export default function Sidebar({
   const userInitials = getUserInitials(userName);
 
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
+    <aside
+      className={`sidebar ${collapsed ? 'collapsed' : ''} ${
+        mobileOpen ? 'mobile-open' : ''
+      }`}
+    >
       <div>
         <div className="sidebar-top">
           {!collapsed && (
-            <img src={logo} alt="MyFlow Finance" className="sidebar-logo-image" />
+            <img
+              src={logo}
+              alt="MyFlow Finance"
+              className="sidebar-logo-image"
+            />
           )}
 
           <button
@@ -101,7 +97,9 @@ export default function Sidebar({
             className="collapse-btn"
             onClick={onToggleCollapse}
             title={collapsed ? 'Expandir menu' : 'Recolher menu'}
-            aria-label={collapsed ? 'Expandir menu lateral' : 'Recolher menu lateral'}
+            aria-label={
+              collapsed ? 'Expandir menu lateral' : 'Recolher menu lateral'
+            }
           >
             {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
@@ -113,7 +111,9 @@ export default function Sidebar({
               key={path}
               to={path}
               onClick={onCloseMobile}
-              className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+              className={({ isActive }) =>
+                `sidebar-link ${isActive ? 'active' : ''}`
+              }
             >
               <Icon size={20} />
               {!collapsed && <span>{label}</span>}

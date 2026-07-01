@@ -3,29 +3,25 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './layouts/MainLayout';
 
-import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import Transactions from './pages/Transactions';
-import Categories from './pages/Categories';
 import Goals from './pages/Goals';
-import Reports from './pages/Reports';
-import { Planning } from './pages/Planning';
-import Imports from './pages/Imports';
-import CategoryRules from './pages/CategoryRules';
-import RecurringTransactions from './pages/RecurringTransactions';
-import MonthlyPlan from './pages/MonthlyPlan';
+import Login from './pages/Login';
+import Transactions from './pages/Transactions';
 
 const protectedRoutes = [
   { path: '/dashboard', element: <Dashboard /> },
-  { path: '/monthly-plan', element: <MonthlyPlan /> },
   { path: '/transactions', element: <Transactions /> },
-  { path: '/categories', element: <Categories /> },
   { path: '/goals', element: <Goals /> },
-  { path: '/reports', element: <Reports /> },
-  { path: '/planning', element: <Planning /> },
-  { path: '/imports', element: <Imports /> },
-  { path: '/category-rules', element: <CategoryRules /> },
-  { path: '/recurring', element: <RecurringTransactions /> },
+];
+
+const disabledRoutes = [
+  '/monthly-plan',
+  '/planning',
+  '/reports',
+  '/categories',
+  '/imports',
+  '/category-rules',
+  '/recurring',
 ];
 
 export default function App() {
@@ -45,6 +41,14 @@ export default function App() {
 
           {protectedRoutes.map(({ path, element }) => (
             <Route key={path} path={path} element={element} />
+          ))}
+
+          {disabledRoutes.map((path) => (
+            <Route
+              key={path}
+              path={path}
+              element={<Navigate to="/dashboard" replace />}
+            />
           ))}
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
