@@ -1,158 +1,108 @@
 # MyFlow Finance
 
-Aplicação web premium para controle financeiro pessoal desenvolvida com React, TypeScript e Vite.
+Aplicação web para controle financeiro pessoal, desenvolvida com React, TypeScript, Vite e Supabase.
+
+O projeto tem como objetivo centralizar o acompanhamento de receitas, despesas, metas e indicadores financeiros em uma interface moderna, responsiva e organizada.
 
 ## Preview
 
-🔗 Produção:
-(https://myflow-finance-app.vercel.app/)
+🔗 Produção:  
+https://myflow-finance-app.vercel.app/
 
 ## Sobre o projeto
 
-O MyFlow Finance foi desenvolvido com foco em:
-- experiência moderna;
-- arquitetura escalável;
-- design system consistente;
-- responsividade real;
-- microinterações refinadas;
-- performance visual;
-- experiência mobile premium.
+O MyFlow Finance foi desenvolvido como projeto de portfólio com foco em aplicações web reais, organização de dados, experiência do usuário e integração com banco de dados.
 
-O projeto evoluiu de um dashboard financeiro simples para uma aplicação com estrutura próxima de produtos SaaS modernos.
-
----
+A aplicação permite que o usuário acompanhe informações financeiras de forma visual, com dashboard, transações, categorias, relatórios e autenticação.
 
 ## Funcionalidades
 
+### Autenticação
+
+- Login de usuário
+- Cadastro de usuário
+- Integração com Supabase Auth
+- Sessão persistente
+
 ### Dashboard
-- KPIs financeiros
+
+- Indicadores financeiros
 - Cards analíticos
+- Visão geral de receitas e despesas
 - Gráficos interativos
-- Insights visuais
+- Resumo visual das informações
 
 ### Transações
+
 - Cadastro de receitas e despesas
-- Edição e exclusão
-- Filtros inteligentes
+- Edição de registros
+- Exclusão de registros
+- Filtros por período, tipo e categoria
 - Busca dinâmica
-- Estados vazios refinados
+- Estados vazios para melhor experiência do usuário
 
 ### Categorias
-- Distribuição por categoria
+
+- Organização das transações por categoria
 - Indicadores visuais
-- Destaques automáticos
+- Distribuição por tipo de movimentação
 
 ### Relatórios
-- Visualização analítica
+
+- Visualização analítica dos dados financeiros
 - Gráficos responsivos
-- Insights financeiros
+- Apoio à tomada de decisão financeira
 
-### UX/UI
+### Interface
+
+- Layout responsivo
 - Dark mode
-- Responsividade completa
-- Sidebar responsiva
-- Mobile navigation
-- Toast notifications
-- Loading skeletons
-- Hover animations
-- Motion system
-- Design tokens
-- Accessibility basics
-
----
+- Navegação lateral
+- Interface adaptada para desktop e mobile
+- Notificações por toast
+- Loading states
+- Componentização da interface
 
 ## Tecnologias utilizadas
 
 ### Frontend
+
 - React
 - TypeScript
 - Vite
 
-### UI / UX
-- CSS Architecture
-- Design Tokens
-- Responsive Design
-- Motion System
+### Backend / Banco de dados
 
-### Bibliotecas
+- Supabase
+- Supabase Auth
+- Supabase Database
+
+### UI e visualização
+
+- CSS modularizado
+- Design tokens
 - Recharts
 - Lucide React
 
-### Deploy
+### Deploy e versionamento
+
 - Vercel
 - GitHub
 
----
+## Estrutura do projeto
 
-## Arquitetura do projeto
+O projeto foi organizado com foco em:
 
-O projeto foi estruturado com foco em:
 - componentização;
-- reutilização;
-- escalabilidade;
-- consistência visual;
-- separação de responsabilidades.
+- separação de responsabilidades;
+- reutilização de componentes;
+- organização de hooks;
+- padronização visual;
+- escalabilidade para novas funcionalidades.
 
-Incluindo:
-- custom hooks;
-- design system;
-- tokens globais;
-- estrutura modular;
-- estados reutilizáveis.
+## Como rodar localmente
 
----
+Clone o repositório:
 
-## Responsividade
-
-O projeto foi otimizado para:
-- Desktop
-- Tablet
-- Mobile
-- iPhone Safari
-- Android Chrome
-
----
-
-## Performance
-
-O projeto utiliza:
-- build otimizado com Vite;
-- lazy rendering visual;
-- skeleton loading;
-- otimizações de transição;
-- arquitetura SPA moderna.
-
----
-
-## Roadmap
-
-### Fase atual
-- Frontend Premium
-- Deploy Production
-- Design System
-- UX refinada
-
-### Próximas evoluções
-- Supabase
-- Autenticação
-- Multiusuário
-- Persistência em banco
-- Dashboard avançado
-- IA financeira
-- PWA
-- Analytics
-
----
-
-## Autor
-
-Desenvolvido por Lucas Gaviti.
-
-GitHub:
-https://github.com/DevGaviti
-
----
-
-## Licença
-
-Projeto desenvolvido para fins de portfólio e estudo.
+```bash
+git clone https://github.com/lucasgaviti/myflow-finance-app.git
