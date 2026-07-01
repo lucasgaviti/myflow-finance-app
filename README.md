@@ -5,7 +5,7 @@ Aplicação web premium para controle financeiro pessoal desenvolvida com React,
 ## Preview
 
 🔗 Produção:
-https://myflow-finance.vercel.app
+(https://myflow-finance-app.vercel.app/)
 
 ## Sobre o projeto
 
