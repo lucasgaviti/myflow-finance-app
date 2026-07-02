@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  CalendarDays,
   CheckCircle2,
   CircleDollarSign,
   Flag,
