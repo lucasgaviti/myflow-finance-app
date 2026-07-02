@@ -1,19 +1,28 @@
 import { useMemo, useState } from 'react';
-import type { ChangeEvent, CSSProperties } from 'react';
+import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle,
-  CheckCircle2,
-  Lightbulb,
-  ShieldCheck,
+  ArrowRight,
+  PiggyBank,
   Target,
-  XCircle,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
-import Card from '../components/Card';
-import CategoryChart from '../components/CategoryChart';
-import EmptyState from '../components/EmptyState';
-import KPICard from '../components/KPICard';
 import PageLoader from '../components/PageLoader';
 import Topbar from '../components/Topbar';
 import TransactionModal from '../components/TransactionModal';
@@ -44,19 +53,60 @@ const PERIOD_OPTIONS = [
   { label: 'Este mês', value: 'month' },
 ] as const;
 
+const MONTHS = [
+  'Jan',
+  'Fev',
+  'Mar',
+  'Abr',
+  'Mai',
+  'Jun',
+  'Jul',
+  'Ago',
+  'Set',
+  'Out',
+  'Nov',
+  'Dez',
+];
+
+const CATEGORY_COLOR_MAP: Record<string, string> = {
+  Alimentação: '#22c55e',
+  Transporte: '#6366f1',
+  Lazer: '#facc15',
+  Saúde: '#ef4444',
+  Moradia: '#a855f7',
+  Salário: '#06b6d4',
+  Investimentos: '#14b8a6',
+  Outros: '#64748b',
+};
+
+const FALLBACK_COLORS = [
+  '#6366f1',
+  '#22c55e',
+  '#facc15',
+  '#ef4444',
+  '#a855f7',
+  '#06b6d4',
+  '#f97316',
+  '#94a3b8',
+];
+
 type PeriodFilter = (typeof PERIOD_OPTIONS)[number]['value'];
-type HealthStatus = 'healthy' | 'attention' | 'critical';
 
 type CategoryData = {
   category: string;
   value: number;
+  color: string;
 };
 
-type DashboardInsight = {
-  icon: 'shield' | 'lightbulb' | 'target';
-  title: string;
-  description: string;
+type MonthlyFinanceData = {
+  month: string;
+  income: number;
+  expense: number;
 };
+
+type MetricTone = 'balance' | 'income' | 'expense' | 'saving';
+
+type ChartMonthFilter = 'all' | number;
 
 function getTodayInputValue() {
   return new Date().toISOString().split('T')[0];
@@ -69,6 +119,18 @@ function formatCurrencyInput(input: string) {
     style: 'currency',
     currency: 'BRL',
   });
+}
+
+function formatCompactMoney(value: number) {
+  if (value >= 1000) {
+    return `R$ ${(value / 1000).toFixed(1)}k`;
+  }
+
+  return formatMoney(value);
+}
+
+function getCategoryColor(category: string, index: number) {
+  return CATEGORY_COLOR_MAP[category] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
 
 function parseInputDate(value: string, time: 'start' | 'end') {
@@ -149,7 +211,40 @@ function getTotalByType(transactions: Transaction[], type: TransactionType) {
     .reduce((total, transaction) => total + transaction.value, 0);
 }
 
-function getCategoryData(transactions: Transaction[]): CategoryData[] {
+function getMonthlyFinanceData(
+  transactions: Transaction[],
+  year: number,
+): MonthlyFinanceData[] {
+  const monthlyTotals = MONTHS.map((month) => ({
+    month,
+    income: 0,
+    expense: 0,
+  }));
+
+  transactions
+    .filter((transaction) => {
+      const transactionDate = new Date(transaction.date);
+
+      return transactionDate.getFullYear() === year;
+    })
+    .forEach((transaction) => {
+      const transactionDate = new Date(transaction.date);
+      const monthIndex = transactionDate.getMonth();
+
+      if (transaction.type === 'income') {
+        monthlyTotals[monthIndex].income += transaction.value;
+      } else {
+        monthlyTotals[monthIndex].expense += transaction.value;
+      }
+    });
+
+  return monthlyTotals;
+}
+
+function getExpenseByCategory(
+  transactions: Transaction[],
+  limit = 7,
+): CategoryData[] {
   const categoryMap = new Map<string, number>();
 
   transactions
@@ -161,75 +256,74 @@ function getCategoryData(transactions: Transaction[]): CategoryData[] {
     });
 
   return Array.from(categoryMap.entries())
-    .map(([category, value]) => ({ category, value }))
-    .sort((a, b) => b.value - a.value);
+    .map(([category, value]) => ({
+      category,
+      value,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit)
+    .map((item, index) => ({
+      ...item,
+      color: getCategoryColor(item.category, index),
+    }));
 }
 
-function getHealthStatus(financialScore: number): HealthStatus {
-  if (financialScore >= 80) {
-    return 'healthy';
+function getTransactionsFromYear(transactions: Transaction[], year: number) {
+  return transactions.filter((transaction) => {
+    const transactionDate = new Date(transaction.date);
+
+    return transactionDate.getFullYear() === year;
+  });
+}
+
+function getRecentTransactions(transactions: Transaction[], limit = 5) {
+  return [...transactions]
+    .sort(
+      (firstTransaction, secondTransaction) =>
+        new Date(secondTransaction.date).getTime() -
+        new Date(firstTransaction.date).getTime(),
+    )
+    .slice(0, limit);
+}
+
+function formatShortDate(date: string) {
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+  }).format(new Date(date));
+}
+
+function getGoalProgress(currentAmount: number, targetAmount: number) {
+  if (targetAmount <= 0) {
+    return 0;
   }
 
-  if (financialScore >= 55) {
-    return 'attention';
-  }
-
-  return 'critical';
+  return Math.min((currentAmount / targetAmount) * 100, 100);
 }
 
-function getHealthTitle(status: HealthStatus) {
-  const titles: Record<HealthStatus, string> = {
-    healthy: 'Saúde financeira boa',
-    attention: 'Atenção ao orçamento',
-    critical: 'Risco financeiro',
-  };
+function getAvailableYears(transactions: Transaction[]) {
+  const currentYear = new Date().getFullYear();
+  const years = new Set<number>([currentYear]);
 
-  return titles[status];
+  transactions.forEach((transaction) => {
+    years.add(new Date(transaction.date).getFullYear());
+  });
+
+  return Array.from(years).sort((firstYear, secondYear) => secondYear - firstYear);
 }
 
-function getHealthDescription(status: HealthStatus) {
-  const descriptions: Record<HealthStatus, string> = {
-    healthy: 'Seu fluxo está positivo e as despesas estão sob controle.',
-    attention: 'Você ainda tem controle, mas a margem de economia está apertada.',
-    critical: 'As despesas estão comprometendo sua capacidade de guardar dinheiro.',
-  };
+const tooltipStyle: CSSProperties = {
+  border: '1px solid var(--finance-border)',
+  borderRadius: 14,
+  background: 'var(--finance-tooltip)',
+  color: 'var(--finance-text)',
+  boxShadow: '0 18px 40px rgba(0, 0, 0, 0.18)',
+};
 
-  return descriptions[status];
-}
-
-function calculateFinancialScore({
-  savingsRate,
-  expenseRate,
-  goalsCount,
-  goalsProgress,
-  transactionCount,
-}: {
-  savingsRate: number;
-  expenseRate: number;
-  goalsCount: number;
-  goalsProgress: number;
-  transactionCount: number;
-}) {
-  const savingsScore =
-    savingsRate >= 20 ? 40 : savingsRate >= 10 ? 32 : savingsRate >= 0 ? 22 : 8;
-
-  const expenseScore =
-    expenseRate <= 70 ? 30 : expenseRate <= 85 ? 22 : expenseRate <= 100 ? 12 : 4;
-
-  const goalsScore = goalsCount > 0 ? 12 : 0;
-  const progressScore = goalsProgress >= 50 ? 12 : goalsProgress > 0 ? 8 : 0;
-  const activityScore = transactionCount > 0 ? 6 : 0;
-
-  return Math.max(
-    0,
-    Math.min(
-      100,
-      Math.round(
-        savingsScore + expenseScore + goalsScore + progressScore + activityScore,
-      ),
-    ),
-  );
-}
+const tooltipLabelStyle: CSSProperties = {
+  color: 'var(--finance-text)',
+  fontWeight: 800,
+};
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -253,17 +347,31 @@ export default function Dashboard() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [chartMonth, setChartMonth] = useState<ChartMonthFilter>('all');
+  const [chartYear, setChartYear] = useState(new Date().getFullYear());
 
+  const currentYear = new Date().getFullYear();
   const hasCustomDateFilter = Boolean(startDate || endDate);
 
-  const filteredTransactions = useMemo(
-    () => filterTransactionsByPeriod(transactions, periodFilter, startDate, endDate),
-    [transactions, periodFilter, startDate, endDate],
+  const availableYears = useMemo(
+    () => getAvailableYears(transactions),
+    [transactions],
   );
 
-  const categoryData = useMemo(
-    () => getCategoryData(filteredTransactions),
-    [filteredTransactions],
+  const currentYearTransactions = useMemo(
+    () => getTransactionsFromYear(transactions, currentYear),
+    [transactions, currentYear],
+  );
+
+  const filteredTransactions = useMemo(
+    () =>
+      filterTransactionsByPeriod(
+        transactions,
+        periodFilter,
+        startDate,
+        endDate,
+      ),
+    [transactions, periodFilter, startDate, endDate],
   );
 
   const filteredIncome = useMemo(
@@ -277,148 +385,127 @@ export default function Dashboard() {
   );
 
   const filteredBalance = filteredIncome - filteredExpense;
+  const savedAmount = Math.max(filteredBalance, 0);
 
-  const totalGoalsCurrent = useMemo(
-    () => goals.reduce((total, goal) => total + goal.currentAmount, 0),
-    [goals],
+  const savingsRate =
+    filteredIncome > 0 ? (savedAmount / filteredIncome) * 100 : 0;
+
+  const monthlyData = useMemo(
+    () => getMonthlyFinanceData(transactions, chartYear),
+    [transactions, chartYear],
   );
 
-  const totalGoalsTarget = useMemo(
-    () => goals.reduce((total, goal) => total + goal.targetAmount, 0),
-    [goals],
+  const chartData = useMemo(() => {
+    if (chartMonth === 'all') {
+      return monthlyData;
+    }
+
+    return [monthlyData[chartMonth]];
+  }, [monthlyData, chartMonth]);
+
+  const currentYearMonthlyData = useMemo(
+    () => getMonthlyFinanceData(transactions, currentYear),
+    [transactions, currentYear],
   );
 
-  const goalsProgress =
-    totalGoalsTarget > 0
-      ? Math.min((totalGoalsCurrent / totalGoalsTarget) * 100, 100)
-      : 0;
+  const categoryData = useMemo(
+    () => getExpenseByCategory(filteredTransactions),
+    [filteredTransactions],
+  );
 
-  const mostAdvancedGoal = useMemo(() => {
+  const annualCategoryData = useMemo(
+    () => getExpenseByCategory(currentYearTransactions, 6),
+    [currentYearTransactions],
+  );
+
+  const recentTransactions = useMemo(
+    () => getRecentTransactions(filteredTransactions),
+    [filteredTransactions],
+  );
+
+  const chartIncomeTotal = monthlyData.reduce(
+    (total, item) => total + item.income,
+    0,
+  );
+
+  const chartExpenseTotal = monthlyData.reduce(
+    (total, item) => total + item.expense,
+    0,
+  );
+
+  const currentYearExpenseTotal = currentYearMonthlyData.reduce(
+    (total, item) => total + item.expense,
+    0,
+  );
+
+  const mainGoal = useMemo(() => {
+    const primaryGoal = goals.find((goal) => goal.isPrimary);
+
+    if (primaryGoal) {
+      return primaryGoal;
+    }
+
     if (goals.length === 0) {
       return null;
     }
 
     return [...goals].sort((firstGoal, secondGoal) => {
-      const firstProgress =
-        firstGoal.targetAmount > 0
-          ? firstGoal.currentAmount / firstGoal.targetAmount
-          : 0;
+      const firstProgress = getGoalProgress(
+        firstGoal.currentAmount,
+        firstGoal.targetAmount,
+      );
 
-      const secondProgress =
-        secondGoal.targetAmount > 0
-          ? secondGoal.currentAmount / secondGoal.targetAmount
-          : 0;
+      const secondProgress = getGoalProgress(
+        secondGoal.currentAmount,
+        secondGoal.targetAmount,
+      );
 
       return secondProgress - firstProgress;
     })[0];
   }, [goals]);
 
-  const mostAdvancedGoalProgress =
-    mostAdvancedGoal && mostAdvancedGoal.targetAmount > 0
-      ? Math.min(
-          (mostAdvancedGoal.currentAmount / mostAdvancedGoal.targetAmount) * 100,
-          100,
-        )
-      : 0;
+  const mainGoalProgress = mainGoal
+    ? getGoalProgress(mainGoal.currentAmount, mainGoal.targetAmount)
+    : 0;
 
-  const savingsRate =
-    filteredIncome > 0 ? (filteredBalance / filteredIncome) * 100 : 0;
+  const remainingGoalAmount = mainGoal
+    ? Math.max(mainGoal.targetAmount - mainGoal.currentAmount, 0)
+    : 0;
 
-  const expenseRate =
-    filteredIncome > 0 ? (filteredExpense / filteredIncome) * 100 : 0;
-
-  const financialScore = calculateFinancialScore({
-    savingsRate,
-    expenseRate,
-    goalsCount: goals.length,
-    goalsProgress,
-    transactionCount: filteredTransactions.length,
-  });
-
-  const healthStatus = getHealthStatus(financialScore);
-  const healthTitle = getHealthTitle(healthStatus);
-  const healthDescription = getHealthDescription(healthStatus);
-
-  const topCategory = categoryData[0] ?? null;
-
-  const dashboardInsights: DashboardInsight[] = [
+  const metricCards = [
     {
-      icon: 'shield',
-      title: 'Economia do período',
-      description:
-        filteredIncome > 0
-          ? `Você economizou ${savingsRate.toFixed(1)}% da renda no período selecionado.`
-          : 'Cadastre receitas para calcular sua taxa de economia.',
-    },
-    {
-      icon: 'lightbulb',
-      title: 'Categoria crítica',
-      description: topCategory
-        ? `${topCategory.category} é a categoria com maior impacto: ${formatMoney(
-            topCategory.value,
-          )}.`
-        : 'Ainda não há despesas suficientes para identificar categorias críticas.',
-    },
-    {
-      icon: 'target',
-      title: 'Direção financeira',
-      description: mostAdvancedGoal
-        ? `Sua meta mais avançada é ${mostAdvancedGoal.title}, com ${mostAdvancedGoalProgress.toFixed(
-            0,
-          )}% concluído.`
-        : 'Crie uma meta para o MyFlow acompanhar seu progresso financeiro.',
-    },
-  ];
-
-  const projectedAnnualSavings = filteredBalance > 0 ? filteredBalance * 12 : 0;
-
-  const executiveSummaryTitle =
-    filteredBalance >= 0 ? 'Seu fluxo está positivo' : 'Seu fluxo precisa de atenção';
-
-  const executiveSummaryDescription =
-    filteredBalance >= 0
-      ? `Você recebeu ${formatMoney(filteredIncome)}, gastou ${formatMoney(
-          filteredExpense,
-        )} e sobrou ${formatMoney(
-          filteredBalance,
-        )} no período. Mantendo esse ritmo, a projeção anual de economia é de ${formatMoney(
-          projectedAnnualSavings,
-        )}.`
-      : `Você recebeu ${formatMoney(filteredIncome)}, gastou ${formatMoney(
-          filteredExpense,
-        )} e fechou o período negativo em ${formatMoney(
-          Math.abs(filteredBalance),
-        )}. Antes de novas compras, revise as categorias de maior impacto.`;
-
-  const kpis = [
-    {
-      label: 'Saldo Atual',
+      title: 'Saldo do período',
       value: formatMoney(filteredBalance),
-      variant: 'balance' as const,
       description:
         filteredBalance >= 0
-          ? 'Resultado positivo no período.'
-          : 'Resultado negativo no período.',
-      trend: filteredBalance >= 0 ? 'Fluxo positivo' : 'Atenção ao saldo',
+          ? 'Resultado positivo no filtro atual.'
+          : 'Despesas acima das entradas.',
+      tone: 'balance' as const,
+      icon: Wallet,
     },
     {
-      label: 'Entradas',
+      title: 'Entradas',
       value: formatMoney(filteredIncome),
-      variant: 'income' as const,
-      description: 'Total recebido no filtro atual.',
+      description: 'Total recebido no período.',
+      tone: 'income' as const,
+      icon: TrendingUp,
     },
     {
-      label: 'Despesas',
+      title: 'Saídas',
       value: formatMoney(filteredExpense),
-      variant: 'expense' as const,
-      description: `${expenseRate.toFixed(1)}% da renda consumida.`,
+      description: 'Total gasto no período.',
+      tone: 'expense' as const,
+      icon: TrendingDown,
     },
     {
-      label: 'Meta Principal',
-      value: mostAdvancedGoal ? `${mostAdvancedGoalProgress.toFixed(0)}%` : 'Criar meta',
-      variant: 'goal' as const,
-      description: mostAdvancedGoal ? mostAdvancedGoal.title : 'Defina seu primeiro objetivo.',
-      trend: mostAdvancedGoal ? 'Em andamento' : 'Comece agora',
+      title: 'Economia',
+      value: formatMoney(savedAmount),
+      description:
+        filteredIncome > 0
+          ? `${savingsRate.toFixed(1)}% da renda preservada.`
+          : 'Cadastre receitas para calcular.',
+      tone: 'saving' as const,
+      icon: PiggyBank,
     },
   ];
 
@@ -504,352 +591,423 @@ export default function Dashboard() {
   }
 
   return (
-    <div>
+    <div className="finance-dashboard-page">
       <Topbar onNewTransaction={openNewTransactionModal} />
 
-      <div className="dashboard-header dashboard-header-compact">
-        <div className="period-filter-wrapper">
-          <select
-            className="period-select"
-            value={periodFilter}
-            onChange={handlePeriodChange}
-          >
-            {PERIOD_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+      <section className="finance-filter-bar">
+        <select
+          className="period-select finance-period-select"
+          value={periodFilter}
+          onChange={handlePeriodChange}
+        >
+          {PERIOD_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
 
-          <div className="custom-date-filter">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(event) => handleStartDateChange(event.target.value)}
-              aria-label="Data inicial"
-            />
+        <div className="finance-date-range">
+          <input
+            type="date"
+            value={startDate}
+            onChange={(event) => handleStartDateChange(event.target.value)}
+            aria-label="Data inicial"
+          />
 
-            <span>até</span>
+          <span>até</span>
 
-            <input
-              type="date"
-              value={endDate}
-              onChange={(event) => handleEndDateChange(event.target.value)}
-              aria-label="Data final"
-            />
+          <input
+            type="date"
+            value={endDate}
+            onChange={(event) => handleEndDateChange(event.target.value)}
+            aria-label="Data final"
+          />
 
-            {hasCustomDateFilter && (
-              <button
-                type="button"
-                className="clear-date-filter"
-                onClick={clearDateRange}
-              >
-                Limpar
-              </button>
-            )}
-          </div>
+          {hasCustomDateFilter && (
+            <button
+              type="button"
+              className="clear-date-filter"
+              onClick={clearDateRange}
+            >
+              Limpar
+            </button>
+          )}
         </div>
-      </div>
+      </section>
 
-      <div className="kpi-grid">
-        {kpis.map((item) => (
-          <KPICard
-            key={item.label}
-            label={item.label}
+      <section className="finance-metric-grid">
+        {metricCards.map((item) => (
+          <FinanceMetricCard
+            key={item.title}
+            title={item.title}
             value={item.value}
-            variant={item.variant}
             description={item.description}
-            trend={item.trend}
+            tone={item.tone}
+            icon={item.icon}
           />
         ))}
-      </div>
+      </section>
 
-      <Card title="Resumo Executivo" subtitle="Leitura direta do período selecionado.">
-        <div
-          className={`planning-diagnosis-card ${
-            filteredBalance >= 0 ? 'healthy' : 'critical'
-          }`}
-          style={executiveSummaryStyles.container}
-        >
-          <div>
-            <span className="goal-eyebrow">Resultado do período</span>
+      <section className="finance-main-grid">
+        <article className="finance-panel finance-panel-large">
+          <PanelHeader
+            title="Entradas x saídas"
+            description="Comparativo mensal entre dinheiro recebido e despesas pagas."
+            actions={
+              <div className="finance-chart-controls">
+                <label className="finance-chart-control">
+                  <span>Mês</span>
 
-            <div className="goal-values">
-              <strong>{executiveSummaryTitle}</strong>
-              <span>{executiveSummaryDescription}</span>
-            </div>
-          </div>
+                  <select
+                    value={chartMonth}
+                    onChange={(event) => {
+                      const selectedValue = event.target.value;
 
-          <div style={executiveSummaryStyles.metrics}>
-            <ExecutiveMiniMetric label="Entrou" value={formatMoney(filteredIncome)} tone="income" />
-            <ExecutiveMiniMetric label="Saiu" value={formatMoney(filteredExpense)} tone="expense" />
-            <ExecutiveMiniMetric
-              label="Sobrou"
-              value={formatMoney(filteredBalance)}
-              tone={filteredBalance >= 0 ? 'income' : 'expense'}
+                      setChartMonth(
+                        selectedValue === 'all'
+                          ? 'all'
+                          : Number(selectedValue),
+                      );
+                    }}
+                  >
+                    <option value="all">Todos</option>
+
+                    {MONTHS.map((month, index) => (
+                      <option key={month} value={index}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="finance-chart-control">
+                  <span>Ano</span>
+
+                  <select
+                    value={chartYear}
+                    onChange={(event) => {
+                      setChartYear(Number(event.target.value));
+                      setChartMonth('all');
+                    }}
+                  >
+                    {availableYears.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            }
+          />
+
+          {chartExpenseTotal === 0 && chartIncomeTotal === 0 ? (
+            <FinanceEmptyState
+              title="Sem dados suficientes"
+              description="Cadastre receitas e despesas para visualizar a análise mensal."
             />
-          </div>
-        </div>
-      </Card>
+          ) : (
+            <div className="finance-chart finance-chart-large">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} barGap={6} barCategoryGap={18}>
+                  <CartesianGrid
+                    vertical={false}
+                    stroke="var(--finance-grid)"
+                    strokeDasharray="3 3"
+                  />
 
-      <Card
-        title="Saúde Financeira"
-        subtitle="Painel executivo do seu fluxo, metas e capacidade de economia."
-      >
-        <div className={`planning-diagnosis-card ${healthStatus}`} style={healthStyles.container}>
-          <div style={healthStyles.content}>
-            <div className="planning-diagnosis-header">
-              <div>
-                <span className="goal-eyebrow">Diagnóstico do período</span>
-
-                <div className="goal-values">
-                  <strong>{healthTitle}</strong>
-                  <span>{healthDescription}</span>
-                </div>
-              </div>
-
-              <div className="planning-metric-icon">
-                {healthStatus === 'healthy' && <CheckCircle2 size={20} />}
-                {healthStatus === 'attention' && <AlertTriangle size={20} />}
-                {healthStatus === 'critical' && <XCircle size={20} />}
-              </div>
-            </div>
-
-            <div style={healthStyles.metricsGrid}>
-              <PremiumHealthMetric
-                label="Score"
-                value={`${financialScore}`}
-                description="Índice calculado com base em saldo, despesas, metas e atividade."
-              />
-
-              <PremiumHealthMetric
-                label="Economia"
-                value={`${savingsRate.toFixed(1)}%`}
-                description="Percentual da renda que sobrou no período."
-              />
-
-              <PremiumHealthMetric
-                label="Metas"
-                value={`${goalsProgress.toFixed(0)}%`}
-                description="Progresso médio das metas cadastradas."
-              />
-            </div>
-          </div>
-
-          <div style={healthStyles.scoreCard}>
-            <div style={healthStyles.scoreCircle}>
-              <strong>{financialScore}</strong>
-              <span>/100</span>
-            </div>
-
-            <div style={healthStyles.scoreInfo}>
-              <span className="planning-metric-label">Classificação</span>
-
-              <strong>
-                {healthStatus === 'healthy'
-                  ? 'Saudável'
-                  : healthStatus === 'attention'
-                    ? 'Atenção'
-                    : 'Crítico'}
-              </strong>
-
-              <p className="planning-metric-description">
-                O score considera saldo do período, taxa de economia, relação entre despesas e renda,
-                metas cadastradas e movimentações registradas.
-              </p>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      <div className="dashboard-grid" style={dashboardGridStyles}>
-        <Card
-          title="Meta Principal"
-          subtitle="O objetivo que mais representa seu avanço financeiro."
-        >
-          {mostAdvancedGoal ? (
-            <div className="planning-diagnosis-card healthy">
-              <div className="planning-diagnosis-header">
-                <div>
-                  <span className="goal-eyebrow">Objetivo em destaque</span>
-
-                  <div className="goal-values">
-                    <strong>{mostAdvancedGoal.title}</strong>
-
-                    <span>
-                      {formatMoney(mostAdvancedGoal.currentAmount)} acumulados de{' '}
-                      {formatMoney(mostAdvancedGoal.targetAmount)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="planning-metric-icon">
-                  <Target size={20} />
-                </div>
-              </div>
-
-              <div style={mainGoalStyles.content}>
-                <div style={mainGoalStyles.progressTrack}>
-                  <div
-                    style={{
-                      ...mainGoalStyles.progressBar,
-                      width: `${mostAdvancedGoalProgress}%`,
+                  <XAxis
+                    dataKey="month"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{
+                      fill: 'var(--finance-muted)',
+                      fontSize: 12,
                     }}
                   />
-                </div>
 
-                <div style={mainGoalStyles.metricsGrid}>
-                  <PremiumHealthMetric
-                    label="Progresso"
-                    value={`${mostAdvancedGoalProgress.toFixed(1)}%`}
-                    description="Da meta concluída."
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{
+                      fill: 'var(--finance-muted)',
+                      fontSize: 12,
+                    }}
+                    tickFormatter={(chartValue) =>
+                      formatCompactMoney(Number(chartValue))
+                    }
                   />
 
-                  <PremiumHealthMetric
-                    label="Acumulado"
-                    value={formatMoney(mostAdvancedGoal.currentAmount)}
-                    description="Valor já guardado."
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    labelStyle={tooltipLabelStyle}
+                    formatter={(chartValue, name) => [
+                      formatMoney(Number(chartValue)),
+                      name === 'income' ? 'Entradas' : 'Saídas',
+                    ]}
+                    labelFormatter={(label) => `Mês: ${label}`}
                   />
 
-                  <PremiumHealthMetric
-                    label="Falta"
-                    value={formatMoney(
-                      Math.max(
-                        mostAdvancedGoal.targetAmount - mostAdvancedGoal.currentAmount,
-                        0,
-                      ),
-                    )}
-                    description="Para concluir."
+                  <Bar
+                    dataKey="income"
+                    name="income"
+                    fill="#22c55e"
+                    radius={[8, 8, 0, 0]}
                   />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="planning-diagnosis-card attention">
-              <div className="planning-diagnosis-header">
-                <div>
-                  <span className="goal-eyebrow">Próximo passo essencial</span>
 
-                  <div className="goal-values">
-                    <strong>Configure sua primeira meta</strong>
-
-                    <span>
-                      O MyFlow fica mais inteligente quando existe um objetivo financeiro para orientar
-                      o orçamento.
-                    </span>
-                  </div>
-                </div>
-
-                <div className="planning-metric-icon">
-                  <Target size={20} />
-                </div>
-              </div>
-
-              <div style={setupStepsStyles}>
-                <SetupStep
-                  index={1}
-                  title="Crie uma meta"
-                  description="Defina o valor que quer alcançar."
-                />
-
-                <SetupStep
-                  index={2}
-                  title="Informe sua reserva"
-                  description="Use o Planejamento para registrar sua base financeira."
-                />
-
-                <SetupStep
-                  index={3}
-                  title="Acompanhe recomendações"
-                  description="O Dashboard passa a orientar suas decisões."
-                />
-              </div>
-
-              <div className="planning-actions">
-                <button type="button" className="primary-btn" onClick={() => navigate('/goals')}>
-                  <Target size={18} />
-                  Criar primeira meta
-                </button>
-              </div>
+                  <Bar
+                    dataKey="expense"
+                    name="expense"
+                    fill="#ef4444"
+                    radius={[8, 8, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           )}
-        </Card>
+        </article>
 
-        <Card title="Despesas por Categoria">
+        <article className="finance-panel">
+          <PanelHeader
+            title="Despesas por categoria"
+            description="Distribuição dos gastos dentro do período selecionado."
+          />
+
           {categoryData.length === 0 ? (
-            <EmptyState
-              icon="🏷️"
-              title="Nenhuma despesa categorizada"
-              description="Cadastre despesas para entender quais categorias mais impactam seu orçamento."
+            <FinanceEmptyState
+              title="Sem despesas no período"
+              description="As categorias aparecem aqui quando houver gastos cadastrados."
             />
           ) : (
-            <div style={categoryChartStyles}>
-              <CategoryChart data={categoryData} />
+            <div className="finance-category-layout">
+              <div className="finance-donut-wrapper finance-donut-wrapper-main">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={categoryData}
+                      dataKey="value"
+                      nameKey="category"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={68}
+                      outerRadius={102}
+                      paddingAngle={4}
+                      stroke="var(--finance-card)"
+                      strokeWidth={5}
+                    >
+                      {categoryData.map((item) => (
+                        <Cell key={item.category} fill={item.color} />
+                      ))}
+                    </Pie>
+
+                    <Tooltip
+                      contentStyle={tooltipStyle}
+                      labelStyle={tooltipLabelStyle}
+                      formatter={(chartValue) => [
+                        formatMoney(Number(chartValue)),
+                        'Total',
+                      ]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+
+                <div className="finance-donut-center">
+                  <span>Total</span>
+                  <strong>{formatMoney(filteredExpense)}</strong>
+                </div>
+              </div>
+
+              <div className="finance-category-list">
+                {categoryData.map((item) => {
+                  const percentage =
+                    filteredExpense > 0
+                      ? (item.value / filteredExpense) * 100
+                      : 0;
+
+                  return (
+                    <div key={item.category} className="finance-category-item">
+                      <div className="finance-category-info">
+                        <div>
+                          <span
+                            className="finance-category-dot"
+                            style={{ backgroundColor: item.color }}
+                          />
+
+                          <strong>{item.category}</strong>
+                        </div>
+
+                        <div className="finance-category-progress">
+                          <span
+                            style={{
+                              width: `${percentage}%`,
+                              backgroundColor: item.color,
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <p>
+                        {formatMoney(item.value)}
+                        <span>{percentage.toFixed(1)}%</span>
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
-        </Card>
-      </div>
+        </article>
+      </section>
 
-      <div style={bottomCardsStyles}>
-        <Card
-          title="Insights Inteligentes"
-          subtitle="Leituras locais geradas a partir do seu fluxo financeiro, sem IA paga."
-        >
-          <div style={insightsListStyles}>
-            {dashboardInsights.map((insight) => (
-              <InsightFeedItem
-                key={insight.title}
-                icon={insight.icon}
-                title={insight.title}
-                description={insight.description}
-              />
+      <section className="finance-secondary-grid">
+        <article className="finance-panel">
+          <PanelHeader
+            title="Meta principal"
+            description="Acompanhamento do objetivo financeiro em destaque."
+          />
+
+          {mainGoal ? (
+            <div className="finance-goal-card">
+              <div>
+                <span>Objetivo em destaque</span>
+                <strong>{mainGoal.title}</strong>
+                <p>
+                  {formatMoney(mainGoal.currentAmount)} de{' '}
+                  {formatMoney(mainGoal.targetAmount)}
+                </p>
+              </div>
+
+              <div className="finance-goal-progress-header">
+                <span>Progresso</span>
+                <strong>{mainGoalProgress.toFixed(1)}%</strong>
+              </div>
+
+              <div className="finance-goal-track">
+                <div
+                  className="finance-goal-fill"
+                  style={{ width: `${mainGoalProgress}%` }}
+                />
+              </div>
+
+              <div className="finance-goal-metrics">
+                <FinanceSmallStat
+                  label="Acumulado"
+                  value={formatMoney(mainGoal.currentAmount)}
+                />
+
+                <FinanceSmallStat
+                  label="Falta"
+                  value={formatMoney(remainingGoalAmount)}
+                />
+              </div>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => navigate('/goals')}
+              >
+                Ver metas
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          ) : (
+            <div className="finance-goal-empty">
+              <div>
+                <span>Próximo passo</span>
+                <strong>Crie sua primeira meta</strong>
+                <p>
+                  Uma meta ajuda a transformar sobra financeira em objetivo real.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => navigate('/goals')}
+              >
+                <Target size={18} />
+                Criar meta
+              </button>
+            </div>
+          )}
+        </article>
+
+        <article className="finance-panel">
+          <PanelHeader
+            title="Participação na base anual"
+            description={`Participação das principais categorias nos gastos de ${currentYear}.`}
+          />
+
+          {annualCategoryData.length === 0 ? (
+            <FinanceEmptyState
+              title="Sem base anual"
+              description="Cadastre despesas para acompanhar a participação anual por categoria."
+            />
+          ) : (
+            <div className="finance-year-share-grid">
+              {annualCategoryData.map((item) => (
+                <YearShareCard
+                  key={item.category}
+                  category={item.category}
+                  value={item.value}
+                  total={currentYearExpenseTotal}
+                  color={item.color}
+                />
+              ))}
+            </div>
+          )}
+        </article>
+      </section>
+
+      <article className="finance-panel">
+        <PanelHeader
+          title="Últimas transações"
+          description="Movimentações mais recentes dentro do período selecionado."
+        />
+
+        {recentTransactions.length === 0 ? (
+          <FinanceEmptyState
+            title="Nenhuma transação no período"
+            description="Cadastre uma receita ou despesa para acompanhar seu extrato."
+          />
+        ) : (
+          <div className="finance-transaction-list">
+            {recentTransactions.map((transaction) => (
+              <div key={transaction.id} className="finance-transaction-row">
+                <div>
+                  <strong>{transaction.title}</strong>
+
+                  <p>
+                    <span>{transaction.category}</span>
+                    {formatShortDate(transaction.date)}
+                  </p>
+                </div>
+
+                <strong
+                  className={`finance-transaction-value ${transaction.type}`}
+                >
+                  {transaction.type === 'expense' ? '-' : '+'}
+                  {formatMoney(transaction.value)}
+                </strong>
+              </div>
             ))}
           </div>
-        </Card>
+        )}
 
-        <Card
-          title="Plano de Ação"
-          subtitle="Checklist objetivo para melhorar seu controle financeiro."
-        >
-          <div style={actionListStyles}>
-            <ChecklistAction
-              done={filteredBalance >= 0}
-              title={filteredBalance >= 0 ? 'Preservar saldo positivo' : 'Recuperar saldo do período'}
-              description={
-                filteredBalance >= 0
-                  ? `Você fechou o período com ${formatMoney(
-                      filteredBalance,
-                    )} de sobra. Direcione parte desse valor para suas metas.`
-                  : `O período está negativo em ${formatMoney(
-                      Math.abs(filteredBalance),
-                    )}. Revise gastos variáveis antes de assumir novas despesas.`
-              }
-            />
-
-            {topCategory && (
-              <ChecklistAction
-                done={false}
-                title={`Revisar ${topCategory.category}`}
-                description={`${topCategory.category} é sua maior categoria de despesa no período, com ${formatMoney(
-                  topCategory.value,
-                )}.`}
-              />
-            )}
-
-            <ChecklistAction
-              done={Boolean(mostAdvancedGoal)}
-              title={mostAdvancedGoal ? 'Manter ritmo da meta' : 'Criar uma meta financeira'}
-              description={
-                mostAdvancedGoal
-                  ? `${mostAdvancedGoal.title} está com ${mostAdvancedGoalProgress.toFixed(
-                      0,
-                    )}% de progresso.`
-                  : 'Sem uma meta, o MyFlow não consegue orientar suas decisões com precisão.'
-              }
-            />
+        {recentTransactions.length > 0 && (
+          <div className="finance-panel-footer">
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => navigate('/transactions')}
+            >
+              Ver todas as transações
+              <ArrowRight size={16} />
+            </button>
           </div>
-        </Card>
-      </div>
+        )}
+      </article>
 
       <TransactionModal
         showModal={showModal}
@@ -873,371 +1031,117 @@ export default function Dashboard() {
   );
 }
 
-const executiveSummaryStyles = {
-  container: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1fr) auto',
-    gap: 22,
-    alignItems: 'center',
-    padding: 22,
-  },
-  metrics: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(110px, 1fr))',
-    gap: 12,
-  },
-} satisfies Record<string, CSSProperties>;
-
-const healthStyles = {
-  container: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1fr) 280px',
-    gap: 32,
-    alignItems: 'stretch',
-  },
-  content: {
-    display: 'grid',
-    gap: 20,
-  },
-  metricsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: 14,
-  },
-  scoreCard: {
-    display: 'grid',
-    gap: 18,
-    alignContent: 'center',
-    justifyItems: 'center',
-    padding: 20,
-    borderRadius: 24,
-    background: 'rgba(255, 255, 255, 0.06)',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-  },
-  scoreCircle: {
-    width: 132,
-    height: 132,
-    borderRadius: '50%',
-    display: 'grid',
-    placeItems: 'center',
-    background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.28), rgba(34, 197, 94, 0.24))',
-    border: '1px solid rgba(255, 255, 255, 0.12)',
-    boxShadow: '0 24px 60px rgba(15, 23, 42, 0.24)',
-  },
-  scoreInfo: {
-    textAlign: 'center',
-    display: 'grid',
-    gap: 6,
-  },
-} satisfies Record<string, CSSProperties>;
-
-const dashboardGridStyles: CSSProperties = {
-  gridTemplateColumns: 'minmax(0, 1.25fr) minmax(320px, 0.75fr)',
-  alignItems: 'stretch',
-};
-
-const mainGoalStyles = {
-  content: {
-    display: 'grid',
-    gap: 14,
-    marginTop: 20,
-  },
-  progressTrack: {
-    height: 18,
-    borderRadius: 999,
-    overflow: 'hidden',
-    background: 'rgba(148, 163, 184, 0.16)',
-    border: '1px solid rgba(148, 163, 184, 0.18)',
-  },
-  progressBar: {
-    height: '100%',
-    borderRadius: 999,
-    background: 'linear-gradient(90deg, #2563eb, #22c55e)',
-    boxShadow: '0 0 24px rgba(37, 99, 235, 0.45)',
-  },
-  metricsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: 12,
-  },
-} satisfies Record<string, CSSProperties>;
-
-const setupStepsStyles: CSSProperties = {
-  display: 'grid',
-  gap: 10,
-  marginTop: 18,
-};
-
-const categoryChartStyles: CSSProperties = {
-  maxWidth: 380,
-  margin: '0 auto',
-};
-
-const bottomCardsStyles: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 24,
-};
-
-const insightsListStyles: CSSProperties = {
-  display: 'grid',
-  gap: 14,
-};
-
-const actionListStyles: CSSProperties = {
-  display: 'grid',
-  gap: 12,
-};
-
-type ExecutiveMiniMetricProps = {
-  label: string;
-  value: string;
-  tone: 'income' | 'expense';
-};
-
-function ExecutiveMiniMetric({ label, value, tone }: ExecutiveMiniMetricProps) {
-  return (
-    <div
-      style={{
-        minWidth: 110,
-        padding: '14px 16px',
-        borderRadius: 18,
-        background: 'var(--premium-soft-surface)',
-        border:
-          tone === 'income'
-            ? '1px solid var(--premium-success-border)'
-            : '1px solid var(--premium-danger-border)',
-      }}
-    >
-      <span className="planning-metric-label">{label}</span>
-
-      <strong
-        style={{
-          display: 'block',
-          marginTop: 8,
-          fontSize: 18,
-          color:
-            tone === 'income'
-              ? 'var(--premium-success-color)'
-              : 'var(--premium-danger-color)',
-        }}
-      >
-        {value}
-      </strong>
-    </div>
-  );
-}
-
-type SetupStepProps = {
-  index: number;
+type FinanceMetricCardProps = {
   title: string;
-  description: string;
-};
-
-function SetupStep({ index, title, description }: SetupStepProps) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 12,
-        alignItems: 'flex-start',
-        padding: 12,
-        borderRadius: 16,
-        background: 'var(--premium-soft-surface)',
-        border: '1px solid var(--premium-soft-border)',
-      }}
-    >
-      <span
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: 10,
-          display: 'grid',
-          placeItems: 'center',
-          flexShrink: 0,
-          fontSize: 12,
-          fontWeight: 900,
-          color: 'var(--premium-step-color)',
-          background: 'var(--premium-step-bg)',
-        }}
-      >
-        {index}
-      </span>
-
-      <div>
-        <strong
-          style={{
-            display: 'block',
-            marginBottom: 2,
-          }}
-        >
-          {title}
-        </strong>
-
-        <p
-          className="planning-metric-description"
-          style={{
-            margin: 0,
-          }}
-        >
-          {description}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-type InsightFeedItemProps = {
-  icon: 'shield' | 'lightbulb' | 'target';
-  title: string;
-  description: string;
-};
-
-function InsightFeedItem({ icon, title, description }: InsightFeedItemProps) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 16,
-        alignItems: 'flex-start',
-        padding: '18px 20px',
-        borderRadius: 22,
-        background: 'var(--premium-soft-surface)',
-        border: '1px solid var(--premium-soft-border)',
-        boxShadow: 'var(--premium-soft-shadow)',
-      }}
-    >
-      <div className="planning-metric-icon">
-        {icon === 'shield' && <ShieldCheck size={18} />}
-        {icon === 'lightbulb' && <Lightbulb size={18} />}
-        {icon === 'target' && <Target size={18} />}
-      </div>
-
-      <div>
-        <strong
-          style={{
-            display: 'block',
-            marginBottom: 6,
-            fontSize: 15,
-          }}
-        >
-          {title}
-        </strong>
-
-        <p
-          className="planning-alert-item"
-          style={{
-            margin: 0,
-          }}
-        >
-          {description}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-type ChecklistActionProps = {
-  done: boolean;
-  title: string;
-  description: string;
-};
-
-function ChecklistAction({ done, title, description }: ChecklistActionProps) {
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '32px minmax(0, 1fr)',
-        gap: 14,
-        alignItems: 'flex-start',
-        padding: '18px 20px',
-        borderRadius: 22,
-        background: done
-          ? 'var(--premium-success-surface)'
-          : 'var(--premium-warning-surface)',
-        border: done
-          ? '1px solid var(--premium-success-border)'
-          : '1px solid var(--premium-warning-border)',
-      }}
-    >
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 12,
-          display: 'grid',
-          placeItems: 'center',
-          color: done
-            ? 'var(--premium-success-color)'
-            : 'var(--premium-warning-color)',
-          background: done
-            ? 'var(--premium-success-icon-bg)'
-            : 'var(--premium-warning-icon-bg)',
-        }}
-      >
-        {done ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
-      </div>
-
-      <div>
-        <strong
-          style={{
-            display: 'block',
-            marginBottom: 4,
-          }}
-        >
-          {title}
-        </strong>
-
-        <p
-          className="planning-alert-item"
-          style={{
-            margin: 0,
-          }}
-        >
-          {description}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-type PremiumHealthMetricProps = {
-  label: string;
   value: string;
   description: string;
+  tone: MetricTone;
+  icon: LucideIcon;
 };
 
-function PremiumHealthMetric({ label, value, description }: PremiumHealthMetricProps) {
+function FinanceMetricCard({
+  title,
+  value,
+  description,
+  tone,
+  icon: Icon,
+}: FinanceMetricCardProps) {
   return (
-    <div
-      className="planning-diagnosis-card"
-      style={{
-        padding: 16,
-      }}
-    >
-      <span className="planning-metric-label">{label}</span>
+    <article className={`finance-metric-card ${tone}`}>
+      <div className="finance-metric-top">
+        <span>
+          <Icon size={18} />
+        </span>
+      </div>
 
-      <strong
-        style={{
-          display: 'block',
-          marginTop: 8,
-          fontSize: 28,
-          lineHeight: 1,
-        }}
-      >
-        {value}
-      </strong>
+      <p>{title}</p>
+      <strong>{value}</strong>
+      <small>{description}</small>
+    </article>
+  );
+}
 
-      <p
-        className="planning-metric-description"
-        style={{
-          marginTop: 8,
-          marginBottom: 0,
-        }}
-      >
-        {description}
-      </p>
+type PanelHeaderProps = {
+  title: string;
+  description: string;
+  actions?: ReactNode;
+};
+
+function PanelHeader({ title, description, actions }: PanelHeaderProps) {
+  return (
+    <header className="finance-panel-header">
+      <div>
+        <h3>{title}</h3>
+        <p>{description}</p>
+      </div>
+
+      {actions && <div className="finance-panel-actions">{actions}</div>}
+    </header>
+  );
+}
+
+type FinanceSmallStatProps = {
+  label: string;
+  value: string;
+};
+
+function FinanceSmallStat({ label, value }: FinanceSmallStatProps) {
+  return (
+    <div className="finance-small-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+type YearShareCardProps = {
+  category: string;
+  value: number;
+  total: number;
+  color: string;
+};
+
+function YearShareCard({
+  category,
+  value,
+  total,
+  color,
+}: YearShareCardProps) {
+  const percentage = total > 0 ? (value / total) * 100 : 0;
+
+  return (
+    <div className="finance-year-share-card">
+      <div className="finance-year-share-top">
+        <span>{category}</span>
+        <strong>{percentage.toFixed(0)}%</strong>
+      </div>
+
+      <div>
+        <p>{formatMoney(value)}</p>
+
+        <div className="finance-year-share-progress">
+          <i
+            style={{
+              width: `${percentage}%`,
+              backgroundColor: color,
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type FinanceEmptyStateProps = {
+  title: string;
+  description: string;
+};
+
+function FinanceEmptyState({ title, description }: FinanceEmptyStateProps) {
+  return (
+    <div className="finance-empty-state">
+      <strong>{title}</strong>
+      <p>{description}</p>
     </div>
   );
 }
