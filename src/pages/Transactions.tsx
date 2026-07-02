@@ -71,8 +71,61 @@ function formatCurrency(input: string) {
   });
 }
 
+function padDatePart(value: number) {
+  return String(value).padStart(2, '0');
+}
+
 function getTodayInputValue() {
-  return new Date().toISOString().split('T')[0];
+  const today = new Date();
+
+  return `${today.getFullYear()}-${padDatePart(today.getMonth() + 1)}-${padDatePart(
+    today.getDate(),
+  )}`;
+}
+
+function parseDateParts(date: string) {
+  const [dateOnly] = date.split('T');
+  const [year, month, day] = dateOnly.split('-').map(Number);
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return { year, month, day };
+}
+
+function parseTransactionDate(date: string) {
+  const parts = parseDateParts(date);
+
+  if (!parts) {
+    return new Date(date);
+  }
+
+  return new Date(parts.year, parts.month - 1, parts.day, 12, 0, 0);
+}
+
+function getDateInputValue(date: string) {
+  const parts = parseDateParts(date);
+
+  if (!parts) {
+    return getTodayInputValue();
+  }
+
+  return `${parts.year}-${padDatePart(parts.month)}-${padDatePart(parts.day)}`;
+}
+
+function toStoredTransactionDate(date: string) {
+  const parts = parseDateParts(date);
+
+  if (!parts) {
+    return new Date().toISOString();
+  }
+
+  return new Date(parts.year, parts.month - 1, parts.day, 12, 0, 0).toISOString();
+}
+
+function getTransactionDateKey(date: string) {
+  return getDateInputValue(date);
 }
 
 function getTypeLabel(type: TransactionType) {
@@ -83,7 +136,11 @@ function formatShortDate(date: string) {
   return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
     month: 'short',
-  }).format(new Date(date));
+  }).format(parseTransactionDate(date));
+}
+
+function formatFullDate(date: string) {
+  return new Intl.DateTimeFormat('pt-BR').format(parseTransactionDate(date));
 }
 
 function formatGroupTitle(date: string) {
@@ -91,13 +148,13 @@ function formatGroupTitle(date: string) {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
-  }).format(new Date(date));
+  }).format(parseTransactionDate(date));
 }
 
 function formatGroupSubtitle(date: string, count: number) {
   const weekDay = new Intl.DateTimeFormat('pt-BR', {
     weekday: 'long',
-  }).format(new Date(date));
+  }).format(parseTransactionDate(date));
 
   return `${weekDay} · ${count} ${count === 1 ? 'movimentação' : 'movimentações'}`;
 }
@@ -105,8 +162,8 @@ function formatGroupSubtitle(date: string, count: number) {
 function sortTransactionsByDate(transactions: Transaction[]) {
   return [...transactions].sort(
     (firstTransaction, secondTransaction) =>
-      new Date(secondTransaction.date).getTime() -
-      new Date(firstTransaction.date).getTime(),
+      parseTransactionDate(secondTransaction.date).getTime() -
+      parseTransactionDate(firstTransaction.date).getTime(),
   );
 }
 
@@ -114,7 +171,7 @@ function groupTransactionsByDate(transactions: Transaction[]): TransactionGroup[
   const grouped = new Map<string, Transaction[]>();
 
   sortTransactionsByDate(transactions).forEach((transaction) => {
-    const key = transaction.date.split('T')[0];
+    const key = getTransactionDateKey(transaction.date);
     const currentGroup = grouped.get(key) ?? [];
 
     grouped.set(key, [...currentGroup, transaction]);
@@ -327,7 +384,7 @@ export default function Transactions() {
         value: numericValue,
         type,
         category,
-        date: new Date(`${date}T12:00:00`).toISOString(),
+        date: toStoredTransactionDate(date),
       };
 
       await addTransaction(newTransaction);
@@ -351,7 +408,7 @@ export default function Transactions() {
     setFormattedValue(formatMoney(transaction.value));
     setType(transaction.type);
     setCategory(transaction.category);
-    setDate(transaction.date.split('T')[0]);
+    setDate(getDateInputValue(transaction.date));
     setEditId(id);
     setShowModal(true);
   }
@@ -373,7 +430,7 @@ export default function Transactions() {
         value: numericValue,
         type,
         category,
-        date: new Date(`${date}T12:00:00`).toISOString(),
+        date: toStoredTransactionDate(date),
       };
 
       await updateTransaction(updatedTransaction);
@@ -458,7 +515,7 @@ export default function Transactions() {
       Categoria: transaction.category,
       Tipo: transaction.type === 'income' ? 'Receita' : 'Despesa',
       Valor: transaction.value,
-      Data: new Date(transaction.date).toLocaleDateString('pt-BR'),
+      Data: formatFullDate(transaction.date),
     }));
 
     exportToCSV('transacoes', rows);
