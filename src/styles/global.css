@@ -4155,3 +4155,54 @@ body.dark option:disabled {
 ::placeholder {
   color: color-mix(in srgb, var(--text-muted) 72%, transparent);
 }
+/* Correção do menu lateral mobile */
+
+@media (max-width: 900px) {
+  .mobile-sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: block;
+    background: rgba(2, 6, 23, 0.55);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: -310px;
+    bottom: 0;
+    z-index: 1300;
+    width: 280px;
+    min-height: 100dvh;
+    filter: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    transform: translateX(0);
+    transition: left 220ms ease;
+  }
+
+  .sidebar.mobile-open {
+    left: 0;
+    filter: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .sidebar.mobile-open * {
+    filter: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .mobile-menu-btn {
+    z-index: 1400;
+  }
+
+  .sidebar.mobile-open .sidebar-link,
+  .sidebar.mobile-open .user-card,
+  .sidebar.mobile-open .collapse-btn {
+    pointer-events: auto;
+  }
+}
