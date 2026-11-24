@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
+  CalendarCheck2,
   LayoutDashboard,
   LogOut,
   Receipt,
@@ -38,6 +39,11 @@ const menuItems: MenuItem[] = [
     label: 'Dashboard',
     icon: LayoutDashboard,
     path: '/dashboard',
+  },
+  {
+    label: 'Planejamento',
+    icon: CalendarCheck2,
+    path: '/monthly-plan',
   },
   {
     label: 'Transações',

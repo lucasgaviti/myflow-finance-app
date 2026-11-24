@@ -388,45 +388,145 @@ function getParticipationPercentage(value: number, total: number) {
 }
 
 
-type CategoryTooltipPayload = {
-  name?: string;
+type CategoryExpenseTooltipPayload = {
   value?: number;
-  payload?: CategoryData;
+  name?: string;
+  payload?: CategoryData & {
+    percentage: number;
+  };
 };
 
-type CategoryDonutTooltipProps = {
+type CategoryExpenseTooltipProps = {
   active?: boolean;
-  payload?: CategoryTooltipPayload[];
-  total: number;
+  payload?: CategoryExpenseTooltipPayload[];
 };
 
-function CategoryDonutTooltip({
-  active,
-  payload,
-  total,
-}: CategoryDonutTooltipProps) {
+function CategoryExpenseTooltip({ active, payload }: CategoryExpenseTooltipProps) {
   if (!active || !payload?.length) {
     return null;
   }
 
   const item = payload[0].payload;
-  const value = Number(payload[0].value ?? 0);
-  const percentage = getParticipationPercentage(value, total);
+  const value = Number(payload[0].value ?? item?.value ?? 0);
   const category = item?.category ?? payload[0].name ?? 'Categoria';
+  const percentage = item?.percentage ?? 0;
   const color = item?.color ?? 'var(--primary)';
 
   return (
-    <div className="finance-donut-tooltip">
-      <div className="finance-donut-tooltip-header">
+    <div className="category-tooltip" role="status" aria-live="polite">
+      <div className="category-tooltip-title">
         <span style={{ backgroundColor: color }} />
         <strong>{category}</strong>
       </div>
-
-      <div className="finance-donut-tooltip-value">
-        {formatMoney(value)}
-        <small>{percentage.toFixed(1)}% do total</small>
-      </div>
+      <span>{formatMoney(value)}</span>
+      <span>{percentage.toFixed(1)}% do total</span>
     </div>
+  );
+}
+
+type CategoryExpenseChartProps = {
+  data: CategoryData[];
+  total: number;
+};
+
+function CategoryExpenseChart({ data, total }: CategoryExpenseChartProps) {
+  const safeTotal = total > 0 ? total : data.reduce((sum, item) => sum + item.value, 0);
+
+  const normalizedData = data.map((item) => ({
+    ...item,
+    percentage: getParticipationPercentage(item.value, safeTotal),
+  }));
+
+  return (
+    <article className="category-card" aria-label="Despesas por categoria">
+      <header className="category-card-header">
+        <div>
+          <h3 className="category-card-title">Despesas por categoria</h3>
+          <p className="category-card-subtitle">
+            Distribuição dos gastos dentro do período selecionado.
+          </p>
+        </div>
+
+        <div className="category-card-total-chip" aria-label={`Total de despesas ${formatMoney(safeTotal)}`}>
+          <span>Total</span>
+          <strong>{formatMoney(safeTotal)}</strong>
+        </div>
+      </header>
+
+      <div className="category-card-body">
+        <div className="category-chart-wrap">
+          <ResponsiveContainer width="100%" height={340}>
+            <PieChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+              <Pie
+                data={normalizedData}
+                dataKey="value"
+                nameKey="category"
+                cx="50%"
+                cy="50%"
+                innerRadius={82}
+                outerRadius={126}
+                paddingAngle={4}
+                cornerRadius={12}
+                stroke="var(--category-ring-gap)"
+                strokeWidth={5}
+                startAngle={90}
+                endAngle={-270}
+                isAnimationActive
+              >
+                {normalizedData.map((item) => (
+                  <Cell key={item.category} fill={item.color} />
+                ))}
+              </Pie>
+
+              <Tooltip
+                cursor={false}
+                content={<CategoryExpenseTooltip />}
+                wrapperStyle={{ zIndex: 40, outline: 'none', pointerEvents: 'none' }}
+                allowEscapeViewBox={{ x: true, y: true }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+
+          <div className="category-center-label" aria-hidden="true">
+            <span>Total</span>
+            <strong>{formatMoney(safeTotal)}</strong>
+            <small>despesas</small>
+          </div>
+        </div>
+
+        <div className="category-legend" aria-label="Lista de despesas por categoria">
+          {normalizedData.map((item) => (
+            <div key={item.category} className="category-legend-item">
+              <div className="category-legend-top">
+                <div className="category-legend-left">
+                  <span
+                    className="category-dot"
+                    style={{ color: item.color, backgroundColor: item.color }}
+                    aria-hidden="true"
+                  />
+                  <span className="category-name">{item.category}</span>
+                </div>
+
+                <div className="category-values">
+                  <span className="category-value">{formatMoney(item.value)}</span>
+                  <span className="category-percent">{item.percentage.toFixed(1)}%</span>
+                </div>
+              </div>
+
+              <div className="category-progress" aria-hidden="true">
+                <div
+                  className="category-progress-bar"
+                  style={{
+                    width: `${item.percentage}%`,
+                    backgroundColor: item.color,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -975,96 +1075,25 @@ export default function Dashboard() {
         </div>
 
         <aside className="finance-studio-category-column">
-          <article className="finance-panel finance-category-panel finance-compact-panel">
-            <PanelHeader
-              title="Despesas por categoria"
-              description="Distribuição dos gastos dentro do período selecionado."
-            />
+          {categoryData.length === 0 ? (
+            <article className="category-card">
+              <header className="category-card-header">
+                <div>
+                  <h3 className="category-card-title">Despesas por categoria</h3>
+                  <p className="category-card-subtitle">
+                    Distribuição dos gastos dentro do período selecionado.
+                  </p>
+                </div>
+              </header>
 
-            {categoryData.length === 0 ? (
               <FinanceEmptyState
                 title="Sem despesas"
                 description="Cadastre gastos para visualizar a distribuição por categoria."
               />
-            ) : (
-              <div className="finance-category-donut-grid finance-category-donut-grid-premium">
-                <div className="finance-donut-wrapper finance-premium-donut">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart margin={{ top: 12, right: 12, bottom: 12, left: 12 }}>
-                      <Pie
-                        data={categoryData}
-                        dataKey="value"
-                        nameKey="category"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="58%"
-                        outerRadius="82%"
-                        paddingAngle={5}
-                        startAngle={90}
-                        endAngle={-270}
-                        stroke="var(--finance-donut-stroke)"
-                        strokeWidth={7}
-                      >
-                        {categoryData.map((item) => (
-                          <Cell key={item.category} fill={item.color} />
-                        ))}
-                      </Pie>
-
-                      <Tooltip
-                        content={<CategoryDonutTooltip total={filteredExpense} />}
-                        cursor={false}
-                        position={{ x: 18, y: 18 }}
-                        allowEscapeViewBox={{ x: true, y: true }}
-                        wrapperStyle={{
-                          zIndex: 30,
-                          outline: 'none',
-                          pointerEvents: 'none',
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-
-                  <div className="finance-donut-center finance-premium-donut-center">
-                    <span>Total</span>
-                    <strong>{formatMoney(filteredExpense)}</strong>
-                    <small>despesas</small>
-                  </div>
-                </div>
-
-                <div className="finance-premium-category-list">
-                  {categoryData.slice(0, 5).map((item) => {
-                    const percentage = getParticipationPercentage(
-                      item.value,
-                      filteredExpense,
-                    );
-
-                    return (
-                      <div key={item.category} className="finance-premium-category-item">
-                        <div className="finance-premium-category-head">
-                          <span style={{ backgroundColor: item.color }} />
-                          <strong>{item.category}</strong>
-                        </div>
-
-                        <div className="finance-premium-category-values">
-                          <strong>{formatMoney(item.value)}</strong>
-                          <small>{percentage.toFixed(1)}%</small>
-                        </div>
-
-                        <div className="finance-premium-category-track">
-                          <i
-                            style={{
-                              width: `${percentage}%`,
-                              backgroundColor: item.color,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </article>
+            </article>
+          ) : (
+            <CategoryExpenseChart data={categoryData} total={filteredExpense} />
+          )}
         </aside>
       </section>
 
