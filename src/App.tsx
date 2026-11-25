@@ -6,23 +6,8 @@ import MainLayout from './layouts/MainLayout';
 import Dashboard from './pages/Dashboard';
 import Goals from './pages/Goals';
 import Login from './pages/Login';
+import MonthlyPlan from './pages/MonthlyPlan';
 import Transactions from './pages/Transactions';
-
-const protectedRoutes = [
-  { path: '/dashboard', element: <Dashboard /> },
-  { path: '/transactions', element: <Transactions /> },
-  { path: '/goals', element: <Goals /> },
-];
-
-const disabledRoutes = [
-  '/monthly-plan',
-  '/planning',
-  '/reports',
-  '/categories',
-  '/imports',
-  '/category-rules',
-  '/recurring',
-];
 
 export default function App() {
   return (
@@ -37,22 +22,21 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/monthly-plan" element={<MonthlyPlan />} />
+          <Route path="/transactions" element={<Transactions />} />
+          <Route path="/goals" element={<Goals />} />
 
-          {protectedRoutes.map(({ path, element }) => (
-            <Route key={path} path={path} element={element} />
-          ))}
-
-          {disabledRoutes.map((path) => (
-            <Route
-              key={path}
-              path={path}
-              element={<Navigate to="/dashboard" replace />}
-            />
-          ))}
-
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/planning" element={<Navigate to="/monthly-plan" replace />} />
+          <Route path="/reports" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/categories" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/imports" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/category-rules" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/recurring" element={<Navigate to="/dashboard" replace />} />
         </Route>
+
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </BrowserRouter>
   );

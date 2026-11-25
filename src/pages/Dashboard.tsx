@@ -1,22 +1,15 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
-import type { LucideIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   Target,
-  TrendingDown,
-  Wallet,
 } from 'lucide-react';
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -53,6 +46,7 @@ const PERIOD_OPTIONS = [
   { label: 'Últimos 7 dias', value: '7days' },
   { label: 'Últimos 30 dias', value: '30days' },
   { label: 'Este mês', value: 'month' },
+  { label: 'Este ano', value: 'year' },
 ] as const;
 
 const MONTHS = [
@@ -71,10 +65,10 @@ const MONTHS = [
 ];
 
 const CATEGORY_COLOR_MAP: Record<string, string> = {
-  Alimentação: '#22c55e',
-  Transporte: '#6366f1',
-  Lazer: '#facc15',
-  Saúde: '#ef4444',
+  Alimentação: '#2a9d8f',
+  Transporte: '#5279ce',
+  Lazer: '#d39a39',
+  Saúde: '#c96b83',
   Moradia: '#a855f7',
   Salário: '#06b6d4',
   Investimentos: '#14b8a6',
@@ -84,7 +78,7 @@ const CATEGORY_COLOR_MAP: Record<string, string> = {
 const FALLBACK_COLORS = [
   '#6366f1',
   '#22c55e',
-  '#facc15',
+  '#d39a39',
   '#ef4444',
   '#a855f7',
   '#06b6d4',
@@ -234,19 +228,21 @@ function filterTransactionsByPeriod(
       return isSameDay(transactionDate, now);
     }
 
+    if (periodFilter === 'year') return transactionDate.getFullYear() === now.getFullYear();
+
     if (periodFilter === 'month') {
       return isSameMonth(transactionDate, now);
     }
 
     const diffInDays =
-      (now.getTime() - transactionDate.getTime()) / (1000 * 60 * 60 * 24);
+      (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(transactionDate.getFullYear(), transactionDate.getMonth(), transactionDate.getDate())) / 86400000;
 
     if (periodFilter === '7days') {
-      return diffInDays <= 7;
+      return diffInDays >= 0 && diffInDays < 7;
     }
 
     if (periodFilter === '30days') {
-      return diffInDays <= 30;
+      return diffInDays >= 0 && diffInDays < 30;
     }
 
     return true;
@@ -291,7 +287,6 @@ function getMonthlyFinanceData(
 
 function getExpenseByCategory(
   transactions: Transaction[],
-  limit = 7,
 ): CategoryData[] {
   const categoryMap = new Map<string, number>();
 
@@ -306,34 +301,10 @@ function getExpenseByCategory(
   return Array.from(categoryMap.entries())
     .map(([category, value]) => ({ category, value }))
     .sort((a, b) => b.value - a.value)
-    .slice(0, limit)
     .map((item, index) => ({
       ...item,
       color: getCategoryColor(item.category, index),
     }));
-}
-
-function getTransactionsFromYear(transactions: Transaction[], year: number) {
-  return transactions.filter((transaction) => {
-    const transactionDate = parseTransactionDate(transaction.date);
-
-    return transactionDate.getFullYear() === year;
-  });
-}
-
-function getTransactionsFromMonth(
-  transactions: Transaction[],
-  year: number,
-  monthIndex: number,
-) {
-  return transactions.filter((transaction) => {
-    const transactionDate = parseTransactionDate(transaction.date);
-
-    return (
-      transactionDate.getFullYear() === year &&
-      transactionDate.getMonth() === monthIndex
-    );
-  });
 }
 
 function getRecentTransactions(transactions: Transaction[], limit = 5) {
@@ -388,45 +359,145 @@ function getParticipationPercentage(value: number, total: number) {
 }
 
 
-type CategoryTooltipPayload = {
-  name?: string;
+type CategoryExpenseTooltipPayload = {
   value?: number;
-  payload?: CategoryData;
+  name?: string;
+  payload?: CategoryData & {
+    percentage: number;
+  };
 };
 
-type CategoryDonutTooltipProps = {
+type CategoryExpenseTooltipProps = {
   active?: boolean;
-  payload?: CategoryTooltipPayload[];
-  total: number;
+  payload?: CategoryExpenseTooltipPayload[];
 };
 
-function CategoryDonutTooltip({
-  active,
-  payload,
-  total,
-}: CategoryDonutTooltipProps) {
+function CategoryExpenseTooltip({ active, payload }: CategoryExpenseTooltipProps) {
   if (!active || !payload?.length) {
     return null;
   }
 
   const item = payload[0].payload;
-  const value = Number(payload[0].value ?? 0);
-  const percentage = getParticipationPercentage(value, total);
+  const value = Number(payload[0].value ?? item?.value ?? 0);
   const category = item?.category ?? payload[0].name ?? 'Categoria';
+  const percentage = item?.percentage ?? 0;
   const color = item?.color ?? 'var(--primary)';
 
   return (
-    <div className="finance-donut-tooltip">
-      <div className="finance-donut-tooltip-header">
+    <div className="category-tooltip" role="status" aria-live="polite">
+      <div className="category-tooltip-title">
         <span style={{ backgroundColor: color }} />
         <strong>{category}</strong>
       </div>
-
-      <div className="finance-donut-tooltip-value">
-        {formatMoney(value)}
-        <small>{percentage.toFixed(1)}% do total</small>
-      </div>
+      <span>{formatMoney(value)}</span>
+      <span>{percentage.toFixed(1)}% do total</span>
     </div>
+  );
+}
+
+type CategoryExpenseChartProps = {
+  data: CategoryData[];
+  total: number;
+};
+
+function CategoryExpenseChart({ data, total }: CategoryExpenseChartProps) {
+  const safeTotal = total > 0 ? total : data.reduce((sum, item) => sum + item.value, 0);
+
+  const normalizedData = data.map((item) => ({
+    ...item,
+    percentage: getParticipationPercentage(item.value, safeTotal),
+  }));
+
+  return (
+    <article className="category-card" aria-label="Despesas por categoria">
+      <header className="category-card-header">
+        <div>
+          <h3 className="category-card-title">Despesas por categoria</h3>
+          <p className="category-card-subtitle">
+            Distribuição dos gastos dentro do período selecionado.
+          </p>
+        </div>
+
+        <div className="category-card-total-chip" aria-label={`Total de despesas ${formatMoney(safeTotal)}`}>
+          <span>Total</span>
+          <strong>{formatMoney(safeTotal)}</strong>
+        </div>
+      </header>
+
+      <div className="category-card-body">
+        <div className="category-chart-wrap">
+          <ResponsiveContainer width="100%" height={232}>
+            <PieChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+              <Pie
+                data={normalizedData}
+                dataKey="value"
+                nameKey="category"
+                cx="50%"
+                cy="50%"
+                innerRadius="68%"
+                outerRadius="96%"
+                paddingAngle={2}
+                cornerRadius={3}
+                stroke="var(--category-ring-gap)"
+                strokeWidth={1}
+                startAngle={90}
+                endAngle={-270}
+                isAnimationActive={false}
+              >
+                {normalizedData.map((item) => (
+                  <Cell key={item.category} fill={item.color} />
+                ))}
+              </Pie>
+
+              <Tooltip
+                cursor={false}
+                content={<CategoryExpenseTooltip />}
+                wrapperStyle={{ zIndex: 40, outline: 'none', pointerEvents: 'none' }}
+                allowEscapeViewBox={{ x: true, y: true }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+
+          <div className="category-center-label" aria-label={`Total de despesas ${formatMoney(safeTotal)}`}>
+            <span>Total</span>
+            <strong>{formatMoney(safeTotal)}</strong>
+            <small>despesas</small>
+          </div>
+        </div>
+
+        <div className="category-legend" aria-label="Lista de despesas por categoria">
+          {normalizedData.map((item) => (
+            <div key={item.category} className="category-legend-item">
+              <div className="category-legend-top">
+                <div className="category-legend-left">
+                  <span
+                    className="category-dot"
+                    style={{ color: item.color, backgroundColor: item.color }}
+                    aria-hidden="true"
+                  />
+                  <span className="category-name">{item.category}</span>
+                </div>
+
+                <div className="category-values">
+                  <span className="category-value">{formatMoney(item.value)}</span>
+                  <span className="category-percent">{item.percentage.toFixed(1)}%</span>
+                </div>
+              </div>
+
+              <div className="category-progress" aria-hidden="true">
+                <div
+                  className="category-progress-bar"
+                  style={{
+                    width: `${item.percentage}%`,
+                    backgroundColor: item.color,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -462,15 +533,13 @@ export default function Dashboard() {
   const [category, setCategory] = useState('Outros');
   const [date, setDate] = useState(getTodayInputValue());
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
+  const [customOpen, setCustomOpen] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [chartMonth, setChartMonth] = useState<ChartMonthFilter>('all');
   const [chartYear, setChartYear] = useState(new Date().getFullYear());
 
-  const today = new Date();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth();
   const hasCustomDateFilter = Boolean(startDate || endDate);
 
   const availableYears = useMemo(
@@ -487,16 +556,6 @@ export default function Dashboard() {
         endDate,
       ),
     [transactions, periodFilter, startDate, endDate],
-  );
-
-  const currentYearTransactions = useMemo(
-    () => getTransactionsFromYear(transactions, currentYear),
-    [transactions, currentYear],
-  );
-
-  const currentMonthTransactions = useMemo(
-    () => getTransactionsFromMonth(transactions, currentYear, currentMonth),
-    [transactions, currentYear, currentMonth],
   );
 
   const monthlyData = useMemo(
@@ -517,29 +576,14 @@ export default function Dashboard() {
     [filteredTransactions],
   );
 
-  const currentMonthIncome = useMemo(
-    () => getTotalByType(currentMonthTransactions, 'income'),
-    [currentMonthTransactions],
-  );
-
-  const currentMonthExpense = useMemo(
-    () => getTotalByType(currentMonthTransactions, 'expense'),
-    [currentMonthTransactions],
-  );
-
-  const currentMonthBalance = currentMonthIncome - currentMonthExpense;
+  const filteredIncome = getTotalByType(filteredTransactions, 'income');
+  const periodBalance = filteredIncome - filteredExpense;
+  const periodRatio = filteredIncome > 0 ? `${(filteredExpense / filteredIncome * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : '—';
 
   const categoryData = useMemo(
-    () => getExpenseByCategory(filteredTransactions, 6),
+    () => getExpenseByCategory(filteredTransactions),
     [filteredTransactions],
   );
-
-  const annualCategoryData = useMemo(
-    () => getExpenseByCategory(currentYearTransactions, 6),
-    [currentYearTransactions],
-  );
-
-  const detailCategoryData = categoryData.length > 0 ? categoryData : annualCategoryData;
 
   const recentTransactions = useMemo(
     () => getRecentTransactions(filteredTransactions),
@@ -558,13 +602,8 @@ export default function Dashboard() {
 
   const chartBalanceTotal = chartIncomeTotal - chartExpenseTotal;
   const chartExpenseRatio =
-    chartIncomeTotal > 0 ? (chartExpenseTotal / chartIncomeTotal) * 100 : 0;
+    chartIncomeTotal > 0 ? `${(chartExpenseTotal / chartIncomeTotal * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : '—';
 
-
-  const largestCategoryExpense = detailCategoryData.reduce(
-    (largest, item) => Math.max(largest, item.value),
-    0,
-  );
 
   const largestMonthlyAmount = getLargestMonthlyAmount(visibleMonthlyData);
 
@@ -602,10 +641,9 @@ export default function Dashboard() {
     ? Math.max(mainGoal.targetAmount - mainGoal.currentAmount, 0)
     : 0;
 
-  const activePeriodLabel =
-    chartMonth === 'all'
-      ? `Ano ${chartYear}`
-      : `${MONTHS[chartMonth]} · ${chartYear}`;
+  const activePeriodLabel = hasCustomDateFilter
+    ? 'Intervalo personalizado'
+    : PERIOD_OPTIONS.find((option) => option.value === periodFilter)?.label ?? 'Todos os períodos';
 
   function handleValueChange(event: ChangeEvent<HTMLInputElement>) {
     const rawValue = event.target.value.replace(/\D/g, '');
@@ -613,11 +651,6 @@ export default function Dashboard() {
 
     setValue(String(numericValue));
     setFormattedValue(formatCurrencyInput(rawValue));
-  }
-
-  function handlePeriodChange(event: ChangeEvent<HTMLSelectElement>) {
-    setPeriodFilter(event.target.value as PeriodFilter);
-    clearDateRange();
   }
 
   function handleStartDateChange(value: string) {
@@ -675,7 +708,8 @@ export default function Dashboard() {
         date: toStoredTransactionDate(date),
       };
 
-      await addTransactionHook(newTransaction);
+      const created = await addTransactionHook(newTransaction);
+      if (!created) return;
 
       resetForm();
       setShowModal(false);
@@ -692,84 +726,29 @@ export default function Dashboard() {
     <div className="finance-dashboard-page finance-dashboard-studio">
       <Topbar onNewTransaction={openNewTransactionModal} />
 
-      <section className="finance-studio-control-strip">
-        <div>
-          <span>Visão financeira</span>
-          <strong>{activePeriodLabel}</strong>
+      <section className="overview-heading"><div><h1>Visão financeira</h1><p>Receitas, despesas e evolução do seu dinheiro.</p></div></section>
+      <section className="overview-filters" aria-label="Período do resumo">
+        <div className="period-chips">{PERIOD_OPTIONS.map(option => <button type="button" key={option.value}
+          aria-pressed={!customOpen && periodFilter === option.value} className={!customOpen && periodFilter === option.value ? 'active' : ''}
+          onClick={() => {setPeriodFilter(option.value); clearDateRange(); setCustomOpen(false);}}>{option.label}</button>)}
+          <button type="button" className={customOpen ? 'active' : ''} aria-pressed={customOpen} onClick={() => {setCustomOpen(true);setPeriodFilter('all');}}>Personalizado</button>
         </div>
-
-        <div className="finance-studio-filter-group">
-          <select
-            className="period-select finance-period-select"
-            value={periodFilter}
-            onChange={handlePeriodChange}
-            aria-label="Filtro de período"
-          >
-            {PERIOD_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <div className="finance-date-range finance-studio-date-range">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(event) => handleStartDateChange(event.target.value)}
-              aria-label="Data inicial"
-            />
-
-            <span>até</span>
-
-            <input
-              type="date"
-              value={endDate}
-              onChange={(event) => handleEndDateChange(event.target.value)}
-              aria-label="Data final"
-            />
-
-            {hasCustomDateFilter && (
-              <button
-                type="button"
-                className="clear-date-filter"
-                onClick={clearDateRange}
-              >
-                Limpar
-              </button>
-            )}
-          </div>
-        </div>
+        {customOpen && <div className="finance-date-range"><label>De<input type="date" value={startDate} onChange={e => handleStartDateChange(e.target.value)} /></label><label>Até<input type="date" value={endDate} onChange={e => handleEndDateChange(e.target.value)} min={startDate || undefined}/></label><button type="button" className="secondary-btn" onClick={clearDateRange}>Limpar</button></div>}
+      </section>
+      {customOpen && startDate && endDate && startDate > endDate && <p role="alert" className="negative">A data inicial deve ser anterior ou igual à data final.</p>}
+      <section className="overview-balance"><div><span>Saldo do período</span><strong className={periodBalance < 0 ? 'negative' : ''}>{formatMoney(periodBalance)}</strong><p>{activePeriodLabel} · receitas menos despesas</p></div><div className="overview-balance-caption">Resultado das movimentações registradas, não saldo bancário.</div></section>
+      <section className="overview-metrics" aria-label="Resumo financeiro">
+        <div><span>Receitas</span><strong className="positive">{formatMoney(filteredIncome)}</strong></div>
+        <div><span>Despesas</span><strong className="negative">{formatMoney(filteredExpense)}</strong></div>
+        <div><span>Comprometimento</span><strong>{periodRatio}</strong><div className="overview-ratio"><i style={{width: `${filteredIncome > 0 ? Math.min(100, filteredExpense / filteredIncome * 100) : 0}%`}}/></div></div>
       </section>
 
       <section className="finance-studio-hero-grid">
         <div className="finance-studio-main-column">
-          <div className="finance-studio-kpis">
-            <StudioKpiCard
-              title="Saldo do mês"
-              value={formatMoney(currentMonthBalance)}
-              description="Resultado entre receitas e despesas no mês atual."
-              tone="balance"
-              icon={Wallet}
-              data={monthlyData}
-              dataKey="balance"
-            />
-
-            <StudioKpiCard
-              title="Despesas do mês"
-              value={formatMoney(currentMonthExpense)}
-              description="Total de saídas registradas no mês atual."
-              tone="expense"
-              icon={TrendingDown}
-              data={monthlyData}
-              dataKey="expense"
-            />
-          </div>
-
           <article className="finance-panel finance-studio-analysis-panel">
             <PanelHeader
-              title="Análise mensal"
-              description="Comparativo entre entradas, saídas e saldo do período."
+              title="Receitas e despesas por mês"
+              description="Histórico independente do filtro de resumo, por mês e ano."
               actions={
                 <div className="finance-chart-controls finance-studio-chart-controls">
                   <label className="finance-chart-control">
@@ -846,17 +825,18 @@ export default function Dashboard() {
 
                   <MetricPill
                     label="Comprometimento"
-                    value={`${chartExpenseRatio.toFixed(1)}%`}
+                    value={chartExpenseRatio}
                     tone="saving"
                   />
                 </div>
 
+                <div className="chart-key"><span><i/> Receitas</span><span><i/> Despesas</span></div>
                 <div className="finance-chart finance-studio-bar-chart">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={visibleMonthlyData}
-                      barGap={8}
-                      barCategoryGap={chartMonth === 'all' ? 16 : 92}
+                      barGap={3}
+                      barCategoryGap={chartMonth === 'all' ? '20%' : '45%'}
                       margin={{ top: 12, right: 8, left: 0, bottom: 0 }}
                     >
                       <CartesianGrid
@@ -902,30 +882,20 @@ export default function Dashboard() {
                       <Bar
                         dataKey="income"
                         name="income"
-                        fill="url(#incomeGradient)"
-                        radius={[10, 10, 4, 4]}
+                        fill="var(--chart-income)"
+                        radius={[4, 4, 0, 0]}
                         maxBarSize={38}
                       />
 
                       <Bar
                         dataKey="expense"
                         name="expense"
-                        fill="url(#expenseGradient)"
-                        radius={[10, 10, 4, 4]}
+                        fill="var(--chart-expense-muted)"
+                        radius={[4, 4, 0, 0]}
                         maxBarSize={38}
                       />
 
-                      <defs>
-                        <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#7c7cff" />
-                          <stop offset="100%" stopColor="#4f46e5" />
-                        </linearGradient>
 
-                        <linearGradient id="expenseGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#f87171" />
-                          <stop offset="100%" stopColor="#dc2626" />
-                        </linearGradient>
-                      </defs>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -933,221 +903,32 @@ export default function Dashboard() {
             )}
           </article>
 
-          <article className="finance-panel finance-expense-detail-panel">
-            <PanelHeader
-              title="Detalhamento de despesas"
-              description="Ranking das categorias com maior peso no filtro atual."
-            />
-
-            {detailCategoryData.length === 0 ? (
-              <FinanceEmptyState
-                title="Sem despesas no período"
-                description="As categorias aparecem aqui quando houver gastos cadastrados."
-              />
-            ) : (
-              <div className="finance-expense-detail-list">
-                {detailCategoryData.map((item) => {
-                  const width = getParticipationPercentage(
-                    item.value,
-                    largestCategoryExpense,
-                  );
-
-                  return (
-                    <div key={item.category} className="finance-expense-detail-row">
-                      <span>{item.category}</span>
-
-                      <div className="finance-expense-detail-track">
-                        <i
-                          style={{
-                            width: `${width}%`,
-                            backgroundColor: item.color,
-                          }}
-                        />
-                      </div>
-
-                      <strong>{formatMoney(item.value)}</strong>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </article>
         </div>
 
         <aside className="finance-studio-category-column">
-          <article className="finance-panel finance-category-panel finance-compact-panel">
-            <PanelHeader
-              title="Despesas por categoria"
-              description="Distribuição dos gastos dentro do período selecionado."
-            />
+          {categoryData.length === 0 ? (
+            <article className="category-card">
+              <header className="category-card-header">
+                <div>
+                  <h3 className="category-card-title">Despesas por categoria</h3>
+                  <p className="category-card-subtitle">
+                    Distribuição dos gastos dentro do período selecionado.
+                  </p>
+                </div>
+              </header>
 
-            {categoryData.length === 0 ? (
               <FinanceEmptyState
                 title="Sem despesas"
                 description="Cadastre gastos para visualizar a distribuição por categoria."
               />
-            ) : (
-              <div className="finance-category-donut-grid finance-category-donut-grid-premium">
-                <div className="finance-donut-wrapper finance-premium-donut">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart margin={{ top: 12, right: 12, bottom: 12, left: 12 }}>
-                      <Pie
-                        data={categoryData}
-                        dataKey="value"
-                        nameKey="category"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="58%"
-                        outerRadius="82%"
-                        paddingAngle={5}
-                        startAngle={90}
-                        endAngle={-270}
-                        stroke="var(--finance-donut-stroke)"
-                        strokeWidth={7}
-                      >
-                        {categoryData.map((item) => (
-                          <Cell key={item.category} fill={item.color} />
-                        ))}
-                      </Pie>
-
-                      <Tooltip
-                        content={<CategoryDonutTooltip total={filteredExpense} />}
-                        cursor={false}
-                        position={{ x: 18, y: 18 }}
-                        allowEscapeViewBox={{ x: true, y: true }}
-                        wrapperStyle={{
-                          zIndex: 30,
-                          outline: 'none',
-                          pointerEvents: 'none',
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-
-                  <div className="finance-donut-center finance-premium-donut-center">
-                    <span>Total</span>
-                    <strong>{formatMoney(filteredExpense)}</strong>
-                    <small>despesas</small>
-                  </div>
-                </div>
-
-                <div className="finance-premium-category-list">
-                  {categoryData.slice(0, 5).map((item) => {
-                    const percentage = getParticipationPercentage(
-                      item.value,
-                      filteredExpense,
-                    );
-
-                    return (
-                      <div key={item.category} className="finance-premium-category-item">
-                        <div className="finance-premium-category-head">
-                          <span style={{ backgroundColor: item.color }} />
-                          <strong>{item.category}</strong>
-                        </div>
-
-                        <div className="finance-premium-category-values">
-                          <strong>{formatMoney(item.value)}</strong>
-                          <small>{percentage.toFixed(1)}%</small>
-                        </div>
-
-                        <div className="finance-premium-category-track">
-                          <i
-                            style={{
-                              width: `${percentage}%`,
-                              backgroundColor: item.color,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </article>
+            </article>
+          ) : (
+            <CategoryExpenseChart data={categoryData} total={filteredExpense} />
+          )}
         </aside>
       </section>
 
       <section className="finance-studio-mid-grid">
-        <article className="finance-panel finance-flow-panel finance-compact-panel">
-          <PanelHeader
-            title="Receitas e despesas"
-            description="Tendência mensal do fluxo financeiro."
-          />
-
-          {largestMonthlyAmount === 0 ? (
-            <FinanceEmptyState
-              title="Sem tendência"
-              description="Cadastre movimentações para acompanhar a curva mensal."
-            />
-          ) : (
-            <div className="finance-chart finance-flow-chart">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={monthlyData}
-                  margin={{ top: 10, right: 8, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    vertical={false}
-                    stroke="var(--finance-grid)"
-                    strokeDasharray="4 6"
-                  />
-
-                  <XAxis
-                    dataKey="month"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{
-                      fill: 'var(--finance-muted)',
-                      fontSize: 10,
-                    }}
-                  />
-
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    width={48}
-                    tick={{
-                      fill: 'var(--finance-muted)',
-                      fontSize: 10,
-                    }}
-                    tickFormatter={(chartValue) => formatCompactMoney(Number(chartValue))}
-                  />
-
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    labelStyle={tooltipLabelStyle}
-                    formatter={(chartValue, name) => [
-                      formatMoney(Number(chartValue)),
-                      name === 'income' ? 'Receitas' : 'Despesas',
-                    ]}
-                  />
-
-                  <Line
-                    type="monotone"
-                    dataKey="income"
-                    name="income"
-                    stroke="#6366f1"
-                    strokeWidth={3}
-                    dot={false}
-                    activeDot={{ r: 5 }}
-                  />
-
-                  <Line
-                    type="monotone"
-                    dataKey="expense"
-                    name="expense"
-                    stroke="#ef4444"
-                    strokeWidth={3}
-                    dot={false}
-                    activeDot={{ r: 5 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </article>
-
         <article className="finance-panel finance-goal-panel">
           <PanelHeader
             title="Meta principal"
@@ -1159,6 +940,7 @@ export default function Dashboard() {
               <div>
                 <span>Objetivo em destaque</span>
                 <strong>{mainGoal.title}</strong>
+                {mainGoal.deadline && mainGoalProgress < 100 && mainGoal.deadline.slice(0,10) < getTodayInputValue() && <span className="overdue-label">Prazo vencido</span>}
                 <p>
                   {formatMoney(mainGoal.currentAmount)} de{' '}
                   {formatMoney(mainGoal.targetAmount)}
@@ -1219,9 +1001,8 @@ export default function Dashboard() {
             </div>
           )}
         </article>
-      </section>
 
-      <section className="finance-studio-latest-grid">
+
         <article className="finance-panel finance-latest-panel">
           <PanelHeader
             title="Últimas transações"
@@ -1291,62 +1072,6 @@ export default function Dashboard() {
         onSave={addTransaction}
       />
     </div>
-  );
-}
-
-type StudioKpiCardProps = {
-  title: string;
-  value: string;
-  description: string;
-  tone: SparkTone;
-  icon: LucideIcon;
-  data: MonthlyFinanceData[];
-  dataKey: keyof Pick<MonthlyFinanceData, 'income' | 'expense' | 'balance'>;
-};
-
-function StudioKpiCard({
-  title,
-  value,
-  description,
-  tone,
-  icon: Icon,
-  data,
-  dataKey,
-}: StudioKpiCardProps) {
-  return (
-    <article className={`finance-studio-kpi ${tone}`}>
-      <div className="finance-studio-kpi-content">
-        <span>
-          <Icon size={17} />
-          {title}
-        </span>
-        <strong>{value}</strong>
-        <p>{description}</p>
-      </div>
-
-      <div className="finance-studio-sparkline">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id={`spark-${tone}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="currentColor" stopOpacity="0.75" />
-                <stop offset="100%" stopColor="currentColor" stopOpacity="0.02" />
-              </linearGradient>
-            </defs>
-
-            <Area
-              type="monotone"
-              dataKey={dataKey}
-              stroke="currentColor"
-              strokeWidth={2.5}
-              fill={`url(#spark-${tone})`}
-              dot={false}
-              activeDot={false}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-    </article>
   );
 }
 

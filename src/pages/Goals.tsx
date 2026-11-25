@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle2,
   CircleDollarSign,
@@ -16,6 +15,7 @@ import ConfirmModal from '../components/ConfirmModal';
 import EmptyState from '../components/EmptyState';
 import LoadingButton from '../components/LoadingButton';
 import Topbar from '../components/Topbar';
+import WorkspaceDialog from '../components/WorkspaceDialog';
 
 import { useGoals } from '../hook/useGoals';
 
@@ -36,7 +36,8 @@ const priorityClassNames: Record<GoalPriority, string> = {
 };
 
 function getTodayInputValue() {
-  return new Date().toISOString().split('T')[0];
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 }
 
 function formatCurrencyInput(input: string) {
@@ -73,7 +74,6 @@ function formatDate(value: string | null) {
 }
 
 export default function Goals() {
-  const navigate = useNavigate();
 
   const {
     goals,
@@ -87,6 +87,7 @@ export default function Goals() {
     getGoalContributions,
   } = useGoals();
 
+  const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
   const [formattedTargetAmount, setFormattedTargetAmount] = useState('');
@@ -273,7 +274,7 @@ export default function Goals() {
     setIsCreating(true);
 
     try {
-      await addGoal({
+      const created = await addGoal({
         title: normalizedTitle,
         targetAmount: Number(targetAmount),
         currentAmount: Number(currentAmount || 0),
@@ -282,7 +283,7 @@ export default function Goals() {
         isPrimary,
       });
 
-      resetForm();
+      if (created) { resetForm(); setCreateOpen(false); }
     } finally {
       setIsCreating(false);
     }
@@ -379,7 +380,7 @@ export default function Goals() {
 
   return (
     <div className="goals-premium-page">
-      <Topbar onNewTransaction={() => navigate('/transactions')} />
+      <Topbar />
 
       <section className="goals-page-header">
         <div>
@@ -393,8 +394,7 @@ export default function Goals() {
         <button
           type="button"
           className="primary-btn goals-header-action"
-          onClick={handleCreateGoal}
-          disabled={isCreating || !title || !targetAmount}
+          onClick={() => { resetForm(); setCreateOpen(true); }}
         >
           <Plus size={18} />
           {isCreating ? 'Criando...' : 'Criar meta'}
@@ -435,10 +435,11 @@ export default function Goals() {
         />
       </section>
 
+      {createOpen && <WorkspaceDialog title="Nova meta" busy={isCreating} onClose={() => {resetForm();setCreateOpen(false);}}>
       <section className="goals-create-panel">
         <div className="goals-panel-header">
           <div>
-            <h2>Nova meta</h2>
+            <h3>Dados do objetivo</h3>
             <p>Defina um objetivo, prazo e prioridade para acompanhar a evolução.</p>
           </div>
         </div>
@@ -446,7 +447,7 @@ export default function Goals() {
         <div className="goals-form-grid">
           <input
             className="goals-input goals-form-wide"
-            placeholder="Ex: Reserva de emergência"
+            aria-label="Nome da meta" placeholder="Ex: Reserva de emergência"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
           />
@@ -454,7 +455,7 @@ export default function Goals() {
           <input
             className="goals-input"
             inputMode="numeric"
-            placeholder="Valor alvo"
+            aria-label="Valor alvo" placeholder="Valor alvo"
             value={formattedTargetAmount}
             onChange={handleTargetAmountChange}
           />
@@ -462,14 +463,14 @@ export default function Goals() {
           <input
             className="goals-input"
             inputMode="numeric"
-            placeholder="Valor atual"
+            aria-label="Valor atual" placeholder="Valor atual"
             value={formattedCurrentAmount}
             onChange={handleCurrentAmountChange}
           />
 
           <select
             className="goals-input"
-            value={priority}
+            aria-label="Prioridade" value={priority}
             onChange={(event) => setPriority(event.target.value as GoalPriority)}
           >
             <option value="high">Prioridade alta</option>
@@ -489,7 +490,7 @@ export default function Goals() {
           <input
             className="goals-input"
             type="date"
-            value={deadline}
+            aria-label="Prazo da meta" value={deadline}
             onChange={(event) => setDeadline(event.target.value)}
           />
 
@@ -504,6 +505,7 @@ export default function Goals() {
           </button>
         </div>
       </section>
+      </WorkspaceDialog>}
 
       <section className="goals-list-panel">
         <div className="goals-panel-header">
@@ -540,6 +542,19 @@ export default function Goals() {
               const remainingAmount = Math.max(goal.targetAmount - goal.currentAmount, 0);
               const goalContributions = getGoalContributions(goal.id);
               const latestContributions = goalContributions.slice(0, 3);
+              const overdue = Boolean(goal.deadline && goal.deadline.slice(0,10) < getTodayInputValue() && remainingAmount > 0);
+              const today = new Date();
+              const deadlineDate = goal.deadline ? new Date(goal.deadline.slice(0,10)+'T23:59:59') : null;
+              const monthsLeft = deadlineDate && deadlineDate > today ? Math.max(1, (deadlineDate.getFullYear()-today.getFullYear())*12+deadlineDate.getMonth()-today.getMonth()+1) : 0;
+              const suggested = monthsLeft > 0 ? formatMoney(Math.ceil(remainingAmount/monthsLeft*100)/100)+'/mês' : '—';
+              // Use completed calendar months only; don't extrapolate from one isolated deposit.
+              const currentMonthKey = getTodayInputValue().slice(0,7);
+              const history = goalContributions.filter(item => item.date.slice(0,7) < currentMonthKey);
+              const distinctMonths = [...new Set(history.map(item => item.date.slice(0,7)))].sort();
+              const firstMonth = distinctMonths[0]?.split('-').map(Number);
+              const elapsedMonths = firstMonth ? (today.getFullYear()-firstMonth[0])*12+today.getMonth()+1-firstMonth[1] : 0;
+              const monthlyPace = distinctMonths.length >= 2 && elapsedMonths > 0 ? history.reduce((sum,item)=>sum+item.amount,0)/elapsedMonths : 0;
+              const forecast = remainingAmount === 0 ? 'Concluída' : monthlyPace > 0 ? `${Math.ceil(remainingAmount/monthlyPace)} meses` : 'Histórico insuficiente';
 
               return (
                 <article key={goal.id} className="goals-card">
@@ -559,6 +574,7 @@ export default function Goals() {
                         </div>
 
                         <h3>{goal.title}</h3>
+                        {overdue && <span className="overdue-label">Prazo vencido</span>}
                       </div>
 
                       <div className="goals-card-actions">
@@ -582,6 +598,7 @@ export default function Goals() {
                     </div>
 
                     <div className="goals-progress-block">
+                      <div className="goal-ring" style={{background: `conic-gradient(var(--primary) ${Math.min(percentage,100)}%, var(--subtle) 0)`}}><span>{percentage.toFixed(0)}%</span></div>
                       <div className="goals-progress-header">
                         <span>Progresso</span>
                         <strong>{percentage.toFixed(1)}%</strong>
@@ -617,6 +634,7 @@ export default function Goals() {
                       />
                     </div>
 
+                    <div className="goal-forecast-grid"><GoalSmallStat label="Ritmo observado" value={monthlyPace > 0 ? formatMoney(monthlyPace)+'/mês' : '—'}/><GoalSmallStat label="Previsão estimada" value={forecast}/><GoalSmallStat label="Aporte mensal sugerido" value={suggested}/></div><small>{overdue ? 'Prazo vencido. Atualize a data para calcular o aporte sugerido.' : 'Estimativas sem rendimentos, considerando meses completos de histórico.'}</small>
                     <div className="goals-card-footer">
                       <button
                         type="button"
@@ -636,14 +654,14 @@ export default function Goals() {
                     </div>
                   </div>
 
-                  <div className="goals-history-panel">
-                    <div className="goals-history-header">
+                  <details className="goals-history-panel">
+                    <summary className="goals-history-header">
                       <strong>Últimos aportes</strong>
                       <span>
                         {goalContributions.length} registro
                         {goalContributions.length === 1 ? '' : 's'}
                       </span>
-                    </div>
+                    </summary>
 
                     {latestContributions.length === 0 ? (
                       <p className="goals-history-empty">
@@ -684,7 +702,7 @@ export default function Goals() {
                         ))}
                       </div>
                     )}
-                  </div>
+                  </details>
                 </article>
               );
             })}

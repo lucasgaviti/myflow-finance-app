@@ -1,199 +1,211 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, LogOut, Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-
-import ThemeToggle from './ThemeToggle';
 
 import { useAuth } from '../contexts/AuthContext';
 import { notifyError, notifySuccess } from '../lib/toast';
+import ThemeToggle from './ThemeToggle';
 
 type TopbarProps = {
-  onNewTransaction: () => void;
+  onNewTransaction?: () => void;
+};
+
+type UserMetadata = {
+  full_name?: string;
+  name?: string;
+  display_name?: string;
 };
 
 const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': 'Dashboard Financeiro',
+  '/dashboard': 'Visão geral',
+  '/monthly-plan': 'Planejamento Mensal',
   '/transactions': 'Transações',
   '/goals': 'Metas',
 };
 
-function getUserInitials(email?: string | null) {
-  if (!email) {
+function getUserDisplayName(
+  email?: string | null,
+  metadata?: UserMetadata | null,
+) {
+  const metadataName =
+    metadata?.full_name?.trim() ||
+    metadata?.name?.trim() ||
+    metadata?.display_name?.trim();
+
+  if (metadataName) {
+    return metadataName;
+  }
+
+  if (email) {
+    return email.split('@')[0];
+  }
+
+  return 'Usuário';
+}
+
+function getUserInitials(displayName: string) {
+  const words = displayName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (words.length === 0) {
     return 'US';
   }
 
-  const [name] = email.split('@');
+  if (words.length === 1) {
+    return words[0].slice(0, 2).toUpperCase();
+  }
 
-  return name.slice(0, 2).toUpperCase();
+  return words
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join('')
+    .toUpperCase();
+}
+
+function getInitialTheme() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const savedTheme =
+    window.localStorage.getItem('myflow-theme') ||
+    window.localStorage.getItem('theme');
+
+  if (savedTheme === 'dark') {
+    return true;
+  }
+
+  if (savedTheme === 'light') {
+    return false;
+  }
+
+  return document.body.classList.contains('dark');
 }
 
 export default function Topbar({ onNewTransaction }: TopbarProps) {
-  const location = useLocation();
   const { user, signOut } = useAuth();
+  const location = useLocation();
 
-  const notificationsRef = useRef<HTMLDivElement | null>(null);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const [darkMode, setDarkMode] = useState(getInitialTheme);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
-  const [darkMode, setDarkMode] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-
-  const userEmail = user?.email ?? 'Usuário';
   const pageTitle = PAGE_TITLES[location.pathname] ?? 'MyFlow Finance';
 
-  const userInitials = useMemo(() => getUserInitials(user?.email), [user?.email]);
+  const userMetadata = user?.user_metadata as UserMetadata | undefined;
+
+  const userName = useMemo(
+    () => getUserDisplayName(user?.email, userMetadata),
+    [user?.email, userMetadata],
+  );
+
+  const userInitials = useMemo(() => getUserInitials(userName), [userName]);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    const shouldUseDarkMode = savedTheme === 'dark';
+    document.body.classList.toggle('dark', darkMode);
+    window.localStorage.setItem('myflow-theme', darkMode ? 'dark' : 'light');
+    window.localStorage.setItem('theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
-    document.body.classList.toggle('dark', shouldUseDarkMode);
-    setDarkMode(shouldUseDarkMode);
-  }, []);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setShowNotifications(false);
-        setShowUserMenu(false);
-      }
-    }
-
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-
-      const clickedNotifications =
-        notificationsRef.current?.contains(target) ?? false;
-
-      const clickedUserMenu = userMenuRef.current?.contains(target) ?? false;
-
-      if (!clickedNotifications) {
-        setShowNotifications(false);
-      }
-
-      if (!clickedUserMenu) {
-        setShowUserMenu(false);
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('mousedown', handleClickOutside);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
-
-  function toggleTheme() {
-    const isDark = !darkMode;
-
-    document.body.classList.toggle('dark', isDark);
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    setDarkMode(isDark);
+  function handleToggleTheme() {
+    setDarkMode((current) => !current);
   }
 
-  function handleNewTransaction() {
-    setShowNotifications(false);
-    setShowUserMenu(false);
-    onNewTransaction();
-  }
-
-  async function handleLogout() {
-    if (isLoggingOut) {
+  async function handleSignOut() {
+    if (isSigningOut) {
       return;
     }
 
-    setIsLoggingOut(true);
-
     try {
+      setIsSigningOut(true);
       await signOut();
       notifySuccess('Sessão encerrada com sucesso.');
     } catch {
-      notifyError('Não foi possível sair da conta.');
-      setIsLoggingOut(false);
+      notifyError('Não foi possível sair da conta agora.');
+      setIsSigningOut(false);
     }
+  }
+
+  function handleToggleNotifications() {
+    setIsNotificationsOpen((current) => !current);
+    setIsUserMenuOpen(false);
+  }
+
+  function handleToggleUserMenu() {
+    setIsUserMenuOpen((current) => !current);
+    setIsNotificationsOpen(false);
   }
 
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <h2 className="topbar-title">{pageTitle}</h2>
+        <span className="topbar-title">{pageTitle}</span>
       </div>
 
       <div className="topbar-right">
-        <ThemeToggle
-          darkMode={darkMode}
-          onToggle={toggleTheme}
-          disabled={isLoggingOut}
-        />
+        <ThemeToggle darkMode={darkMode} onToggle={handleToggleTheme} />
 
-        <div className="topbar-menu-wrapper" ref={notificationsRef}>
+        <div className="topbar-menu-wrapper">
           <button
             type="button"
             className="icon-btn"
-            title="Notificações"
+            onClick={handleToggleNotifications}
             aria-label="Abrir notificações"
-            aria-haspopup="menu"
-            aria-expanded={showNotifications}
-            disabled={isLoggingOut}
-            onClick={() => {
-              setShowNotifications((currentState) => !currentState);
-              setShowUserMenu(false);
-            }}
+            aria-expanded={isNotificationsOpen}
           >
             <Bell size={18} />
           </button>
 
-          {showNotifications && (
-            <div className="topbar-dropdown" role="menu">
+          {isNotificationsOpen && (
+            <div className="topbar-dropdown">
               <strong>Notificações</strong>
-              <p>Nenhuma notificação no momento.</p>
+              <p>
+                Nenhuma notificação importante no momento. Os próximos alertas
+                do planejamento aparecerão aqui.
+              </p>
             </div>
           )}
         </div>
 
-        <button
-          type="button"
-          className="primary-btn"
-          disabled={isLoggingOut}
-          onClick={handleNewTransaction}
-        >
-          <Plus size={18} />
-          Nova transação
-        </button>
+        {onNewTransaction && (
+          <button
+            type="button"
+            className="primary-btn"
+            aria-label="Nova transação"
+            onClick={onNewTransaction}
+          >
+            <Plus size={16} />
+            Nova transação
+          </button>
+        )}
 
-        <div className="topbar-menu-wrapper" ref={userMenuRef}>
+        <div className="topbar-menu-wrapper">
           <button
             type="button"
             className="topbar-avatar"
-            title="Menu do usuário"
-            aria-label="Abrir menu do usuário"
-            aria-haspopup="menu"
-            aria-expanded={showUserMenu}
-            disabled={isLoggingOut}
-            onClick={() => {
-              setShowUserMenu((currentState) => !currentState);
-              setShowNotifications(false);
-            }}
+            onClick={handleToggleUserMenu}
+            aria-label="Abrir menu da conta"
+            aria-expanded={isUserMenuOpen}
           >
             {userInitials}
           </button>
 
-          {showUserMenu && (
-            <div className="topbar-dropdown user-dropdown" role="menu">
-              <strong>{userEmail}</strong>
-              <p>Conta conectada</p>
+          {isUserMenuOpen && (
+            <div className="topbar-dropdown user-dropdown">
+              <strong>{userName}</strong>
+              <p>{user?.email ?? 'Conta pessoal'}</p>
 
               <button
                 type="button"
                 className="logout-btn"
-                disabled={isLoggingOut}
-                onClick={handleLogout}
+                onClick={handleSignOut}
+                disabled={isSigningOut}
               >
                 <LogOut size={16} />
-                {isLoggingOut ? 'Saindo...' : 'Sair da conta'}
+                {isSigningOut ? 'Saindo...' : 'Sair da conta'}
               </button>
             </div>
           )}
