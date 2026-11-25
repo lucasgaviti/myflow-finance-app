@@ -6,6 +6,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CalendarDays,
+  Circle,
   CheckCircle2,
   ChevronDown,
   CircleDollarSign,
@@ -13,9 +14,7 @@ import {
   Loader2,
   Plus,
   ReceiptText,
-  Repeat2,
   Search,
-  Sparkles,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -23,6 +22,7 @@ import {
 } from 'lucide-react';
 
 import Topbar from '../components/Topbar';
+import WorkspaceDialog from '../components/WorkspaceDialog';
 import { useMonthlyPlan } from '../hook/useMonthlyPlan';
 import { useTransactions } from '../hook/useTransactions';
 import { notifyError, notifySuccess } from '../lib/toast';
@@ -123,8 +123,26 @@ type TouchedFields = {
 
 type FormErrors = Partial<Record<keyof TouchedFields, string>>;
 
+function dateKey(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 function getTodayInputValue() {
-  return new Date().toISOString().split('T')[0];
+  const today = new Date();
+  return dateKey(today.getFullYear(), today.getMonth() + 1, today.getDate());
+}
+
+function getPeriodBounds(month: number, year: number) {
+  return {
+    min: dateKey(year, month, 1),
+    max: dateKey(year, month, new Date(year, month, 0).getDate()),
+  };
+}
+
+function getDefaultDueDate(month: number, year: number) {
+  const { min, max } = getPeriodBounds(month, year);
+  const today = getTodayInputValue();
+  return today >= min && today <= max ? today : min;
 }
 
 function getCurrentYearOptions() {
@@ -216,17 +234,6 @@ function getCategoryLabel(category: string) {
   return `${categoryMeta.icon} ${categoryMeta.label}`;
 }
 
-function sortRecentItems(items: MonthlyPlanItem[]) {
-  return [...items]
-    .sort((firstItem, secondItem) => {
-      const firstDate = firstItem.updatedAt || firstItem.createdAt;
-      const secondDate = secondItem.updatedAt || secondItem.createdAt;
-
-      return secondDate.localeCompare(firstDate);
-    })
-    .slice(0, 4);
-}
-
 export default function MonthlyPlan() {
   const [selectedMonth, setSelectedMonth] = useState(CURRENT_DATE.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(CURRENT_DATE.getFullYear());
@@ -242,6 +249,8 @@ export default function MonthlyPlan() {
 
   const { addTransaction, updateTransaction, removeTransaction } = useTransactions();
 
+  const [formOpen, setFormOpen] = useState(false);
+  const [listFilter, setListFilter] = useState<'all' | 'pending' | 'paid'> ('all');
   const [title, setTitle] = useState('');
   const [formattedAmount, setFormattedAmount] = useState('');
   const [type, setType] = useState<MonthlyPlanItemType>('fixed_expense');
@@ -265,35 +274,14 @@ export default function MonthlyPlan() {
   const [deleteLinkedTransaction, setDeleteLinkedTransaction] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const incomeItems = useMemo(
-    () => items.filter((item) => item.type === 'income'),
-    [items],
-  );
-
-  const expenseItems = useMemo(
-    () => items.filter((item) => item.type === 'fixed_expense'),
-    [items],
-  );
-
-  const incomeProgress = getProgressPercentage(
-    summary.receivedIncome,
-    summary.expectedIncome,
-  );
-
-  const expenseProgress = getProgressPercentage(
-    summary.paidFixedExpenses,
-    summary.fixedExpenses,
-  );
-
   const selectedPeriodLabel = `${MONTHS[selectedMonth - 1]} de ${selectedYear}`;
-  const plannedTotal = summary.expectedIncome + summary.fixedExpenses;
-  const confirmedTotal = summary.receivedIncome + summary.paidFixedExpenses;
-  const completionProgress = getProgressPercentage(confirmedTotal, plannedTotal);
+  const completionProgress = getProgressPercentage(summary.completedItems, items.length);
+  const visibleItems = useMemo(() => [...items].filter(item => listFilter === 'all' || (listFilter === 'paid' ? item.paid : !item.paid)).sort((a,b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.title.localeCompare(b.title)), [items, listFilter]);
   const amountValue = parseFormattedCurrency(formattedAmount);
+  const periodBounds = getPeriodBounds(selectedMonth, selectedYear);
   const formTitleLabel = type === 'income' ? 'Descrição da receita' : 'Descrição da despesa';
   const selectedCategoryMeta = getCategoryMeta(category);
 
-  const recentPlannedItems = useMemo(() => sortRecentItems(items), [items]);
 
   const formErrors = useMemo<FormErrors>(() => {
     const errors: FormErrors = {};
@@ -317,10 +305,12 @@ export default function MonthlyPlan() {
 
     if (!dueDate) {
       errors.dueDate = 'Informe uma data prevista.';
+    } else if (dueDate < periodBounds.min || dueDate > periodBounds.max) {
+      errors.dueDate = 'A data prevista deve pertencer ao mês e ano selecionados.';
     }
 
     return errors;
-  }, [amountValue, category, dueDate, title]);
+  }, [amountValue, category, dueDate, title, periodBounds.min, periodBounds.max]);
 
   const isFormValid = Object.keys(formErrors).length === 0;
 
@@ -360,7 +350,7 @@ export default function MonthlyPlan() {
     setFormattedAmount('');
     setType('fixed_expense');
     setCategory('Contas fixas');
-    setDueDate(getTodayInputValue());
+    setDueDate(getDefaultDueDate(selectedMonth, selectedYear));
     setEditingItemId(null);
     setTouched({
       title: false,
@@ -370,13 +360,23 @@ export default function MonthlyPlan() {
     });
   }
 
+  function handlePeriodChange(month: number, year: number) {
+    if (isSaving || isToggling || isDeleting) return;
+    // Do not let an edit silently move a saved item to a different period.
+    if (editingItemId) resetForm();
+    setSelectedMonth(month);
+    setSelectedYear(year);
+    setDueDate(getDefaultDueDate(month, year));
+    setTouched((current) => ({ ...current, dueDate: false }));
+  }
+
   function fillFormToEdit(item: MonthlyPlanItem) {
     setEditingItemId(item.id);
     setTitle(item.title);
     setFormattedAmount(formatMoney(item.amount));
     setType(item.type);
     setCategory(item.category);
-    setDueDate(item.dueDate ?? getTodayInputValue());
+    setDueDate(item.dueDate ?? getDefaultDueDate(selectedMonth, selectedYear));
     setTouched({
       title: true,
       amount: true,
@@ -384,7 +384,7 @@ export default function MonthlyPlan() {
       dueDate: true,
     });
 
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setFormOpen(true);
   }
 
   async function handleSaveItem() {
@@ -422,8 +422,10 @@ export default function MonthlyPlan() {
           });
         }
 
+        if (!updatedItem) return;
         notifySuccess('Item atualizado com sucesso.');
         resetForm();
+        setFormOpen(false);
         return;
       }
 
@@ -439,6 +441,7 @@ export default function MonthlyPlan() {
 
       if (createdItem) {
         resetForm();
+        setFormOpen(false);
       }
     } catch {
       notifyError('Não foi possível salvar o item agora.');
@@ -454,15 +457,18 @@ export default function MonthlyPlan() {
   }
 
   async function confirmToggleItem() {
-    if (!toggleItem) {
+    if (!toggleItem || isToggling) {
       return;
     }
+    if (!toggleItem.paid && !settlementDate) { notifyError('Informe a data da movimentação.'); return; }
 
     setIsToggling(true);
 
     try {
       if (!toggleItem.paid) {
-        const createdTransaction = await addTransaction({
+        const createdTransaction = toggleItem.transactionId ? await updateTransaction({
+          id: toggleItem.transactionId, title: toggleItem.title, value: toggleItem.amount, type: getFinancialType(toggleItem.type), category: toggleItem.category, date: `${settlementDate}T12:00:00`,
+        }) : await addTransaction({
           id: 0,
           title: toggleItem.title,
           value: toggleItem.amount,
@@ -471,12 +477,14 @@ export default function MonthlyPlan() {
           date: `${settlementDate}T12:00:00`,
         });
 
-        await updateItem(toggleItem.id, {
+        if (!createdTransaction) return;
+        const saved = await updateItem(toggleItem.id, {
           paid: true,
           paidAt: settlementDate,
-          transactionId: createdTransaction?.id ?? null,
+          transactionId: createdTransaction.id,
         });
 
+        if (!saved) { notifyError('Transação registrada, mas o planejamento não foi atualizado. Confira Transações antes de tentar novamente.'); setToggleItem(null); return; }
         notifySuccess(
           toggleItem.type === 'income'
             ? 'Entrada recebida e registrada em Transações.'
@@ -558,30 +566,28 @@ export default function MonthlyPlan() {
         <PeriodControl
           month={selectedMonth}
           year={selectedYear}
-          onMonthChange={setSelectedMonth}
-          onYearChange={setSelectedYear}
+          disabled={isSaving || isToggling || isDeleting}
+          onMonthChange={(month) => handlePeriodChange(month, selectedYear)}
+          onYearChange={(year) => handlePeriodChange(selectedMonth, year)}
         />
       </header>
 
-      <section className="mplan-create-panel" aria-labelledby="mplan-create-title">
-        <SmartPlanPanel
-          items={items}
-          expectedIncome={summary.expectedIncome}
-          fixedExpenses={summary.fixedExpenses}
-          projectedBalance={summary.projectedBalance}
-          completionProgress={completionProgress}
-          recentItems={recentPlannedItems}
-        />
-
-        <div className="mplan-form-card" aria-label="Cadastro de item recorrente">
+      <section className="plan-workbench">
+        <div className="plan-workbench-head"><div><h2>Itens do mês</h2><p>Confirme recebimentos e pagamentos conforme acontecerem.</p></div><button className="primary-btn" type="button" onClick={() => {resetForm();setFormOpen(true);}}><Plus size={17}/> Novo item</button></div>
+        <div className="plan-progress"><div><span>Confirmação do mês</span><strong>{summary.completedItems} de {items.length} itens</strong></div><div className="mplan-progress-track"><span style={{width: `${completionProgress}%`}}/></div></div>
+        <div className="period-chips" aria-label="Filtrar itens">{([['all','Todos'],['pending','Pendentes'],['paid','Confirmados']] as const).map(([key,label]) => <button type="button" key={key} className={listFilter===key?'active':''} aria-pressed={listFilter===key} onClick={() => setListFilter(key)}>{label}</button>)}</div>
+        {isLoading ? <p role="status">Carregando planejamento...</p> : visibleItems.length ? <div className="mplan-row-list">{visibleItems.map(item => <PlanItemRow key={item.id} item={item} onToggle={requestToggleItem} onEdit={fillFormToEdit} onDelete={requestDeleteItem}/>)}</div> : <div className="mplan-empty-state"><CalendarDays size={23}/><strong>Nenhum item neste filtro</strong><p>Cadastre suas receitas e contas previstas para o mês.</p></div>}
+      </section>
+      {formOpen && <WorkspaceDialog title={editingItemId ? 'Editar item' : 'Novo item'} busy={isSaving} drawer onClose={() => {resetForm();setFormOpen(false);}}>
+        <div className="mplan-form-card" aria-label="Cadastro de item planejado">
           <div className="mplan-form-header">
             <div>
               <span className="mplan-eyebrow">Cadastro inteligente</span>
               <h2 id="mplan-create-title">
-                {editingItemId ? 'Editar item recorrente' : 'Novo item recorrente'}
+                {editingItemId ? 'Dados do item' : 'Dados do lançamento'}
               </h2>
               <p>
-                Cadastre uma receita ou despesa mensal. Quando for confirmado,
+                Cadastre uma receita ou despesa prevista. Quando for confirmado,
                 o item cria automaticamente uma transação vinculada.
               </p>
             </div>
@@ -667,6 +673,8 @@ export default function MonthlyPlan() {
                 <input
                   id="mplan-date"
                   type="date"
+                  min={periodBounds.min}
+                  max={periodBounds.max}
                   value={dueDate}
                   disabled={isSaving}
                   aria-invalid={Boolean(touched.dueDate && formErrors.dueDate)}
@@ -689,7 +697,9 @@ export default function MonthlyPlan() {
               ) : (
                 <>
                   <AlertTriangle size={16} />
-                  Preencha os campos obrigatórios para habilitar o cadastro.
+                  {dueDate && formErrors.dueDate
+                    ? formErrors.dueDate
+                    : 'Preencha os campos obrigatórios para habilitar o cadastro.'}
                 </>
               )}
             </div>
@@ -700,7 +710,7 @@ export default function MonthlyPlan() {
                   type="button"
                   className="secondary-btn"
                   disabled={isSaving}
-                  onClick={resetForm}
+                  onClick={() => { resetForm(); setFormOpen(false); }}
                 >
                   Cancelar edição
                 </button>
@@ -722,41 +732,7 @@ export default function MonthlyPlan() {
             </div>
           </div>
         </div>
-      </section>
-
-      <section className="mplan-lists-layout" aria-label="Itens recorrentes planejados">
-        <PlanListPanel
-          title="Entradas previstas"
-          subtitle="Receitas recorrentes"
-          description="Receitas mensais que você espera receber no período."
-          tone="income"
-          emptyTitle="Nenhuma entrada planejada"
-          items={incomeItems}
-          total={summary.expectedIncome}
-          completed={summary.receivedIncome}
-          progress={incomeProgress}
-          isLoading={isLoading}
-          onToggle={requestToggleItem}
-          onEdit={fillFormToEdit}
-          onDelete={requestDeleteItem}
-        />
-
-        <PlanListPanel
-          title="Despesas fixas"
-          subtitle="Compromissos fixos"
-          description="Contas mensais e compromissos recorrentes."
-          tone="expense"
-          emptyTitle="Nenhuma despesa fixa planejada"
-          items={expenseItems}
-          total={summary.fixedExpenses}
-          completed={summary.paidFixedExpenses}
-          progress={expenseProgress}
-          isLoading={isLoading}
-          onToggle={requestToggleItem}
-          onEdit={fillFormToEdit}
-          onDelete={requestDeleteItem}
-        />
-      </section>
+      </WorkspaceDialog>}
 
       <section className="mplan-reading-panel" aria-labelledby="mplan-reading-title">
         <div className="mplan-reading-heading">
@@ -793,13 +769,13 @@ export default function MonthlyPlan() {
           <PlanReadingCard
             icon={TrendingDown}
             label="Comprometimento"
-            value={getCommittedLabel(summary.committedPercentage)}
+            value={summary.expectedIncome > 0 ? getCommittedLabel(summary.committedPercentage) : '—'}
             tone="neutral"
           />
           <PlanReadingCard
             icon={CheckCircle2}
             label="Progresso"
-            value={`${completionProgress.toFixed(0)}% confirmado`}
+            value={`${completionProgress.toFixed(0)}% dos itens`}
             tone="income"
           />
         </div>
@@ -896,17 +872,19 @@ function SummaryChip({ label, value, tone }: SummaryChipProps) {
 type PeriodControlProps = {
   month: number;
   year: number;
+  disabled: boolean;
   onMonthChange: (month: number) => void;
   onYearChange: (year: number) => void;
 };
 
-function PeriodControl({ month, year, onMonthChange, onYearChange }: PeriodControlProps) {
+function PeriodControl({ month, year, disabled, onMonthChange, onYearChange }: PeriodControlProps) {
   return (
     <div className="mplan-period-control" aria-label="Período do planejamento">
       <label htmlFor="mplan-period-month">
         <span>Mês</span>
         <select
           id="mplan-period-month"
+          disabled={disabled}
           value={month}
           onChange={(event) => onMonthChange(Number(event.target.value))}
         >
@@ -922,6 +900,7 @@ function PeriodControl({ month, year, onMonthChange, onYearChange }: PeriodContr
         <span>Ano</span>
         <select
           id="mplan-period-year"
+          disabled={disabled}
           value={year}
           onChange={(event) => onYearChange(Number(event.target.value))}
         >
@@ -932,97 +911,6 @@ function PeriodControl({ month, year, onMonthChange, onYearChange }: PeriodContr
           ))}
         </select>
       </label>
-    </div>
-  );
-}
-
-type SmartPlanPanelProps = {
-  items: MonthlyPlanItem[];
-  expectedIncome: number;
-  fixedExpenses: number;
-  projectedBalance: number;
-  completionProgress: number;
-  recentItems: MonthlyPlanItem[];
-};
-
-function SmartPlanPanel({
-  items,
-  expectedIncome,
-  fixedExpenses,
-  projectedBalance,
-  completionProgress,
-  recentItems,
-}: SmartPlanPanelProps) {
-  return (
-    <aside className="mplan-create-intro" aria-label="Resumo inteligente do planejamento">
-      <div className="mplan-smart-header">
-        <span className="mplan-smart-icon">
-          <Sparkles size={18} />
-        </span>
-        <div>
-          <span className="mplan-eyebrow">Itens recorrentes</span>
-          <h2>Resumo do mês</h2>
-        </div>
-      </div>
-
-      <div className="mplan-smart-total">
-        <strong>{items.length}</strong>
-        <span>{items.length === 1 ? 'item cadastrado' : 'itens cadastrados'}</span>
-      </div>
-
-      <div className="mplan-create-stats" aria-label="Indicadores do planejamento">
-        <PlanStat label="Receitas" value={formatMoney(expectedIncome)} tone="income" />
-        <PlanStat label="Despesas" value={formatMoney(fixedExpenses)} tone="expense" />
-        <PlanStat
-          label="Saldo"
-          value={formatMoney(projectedBalance)}
-          tone={projectedBalance >= 0 ? 'income' : 'expense'}
-        />
-      </div>
-
-      <div className="mplan-smart-progress">
-        <div>
-          <span>Confirmação do mês</span>
-          <strong>{completionProgress.toFixed(0)}%</strong>
-        </div>
-        <div className="mplan-progress-track" aria-hidden="true">
-          <span className="income" style={{ width: `${completionProgress}%` }} />
-        </div>
-      </div>
-
-      <div className="mplan-smart-note">
-        <CheckCircle2 size={15} />
-        Confirmar um item cria a movimentação automaticamente em Transações.
-      </div>
-
-      <div className="mplan-create-recent">
-        <span>Últimos itens</span>
-        {recentItems.length === 0 ? (
-          <p>Nenhum item cadastrado ainda.</p>
-        ) : (
-          recentItems.map((item) => (
-            <div key={item.id}>
-              <strong>{item.title}</strong>
-              <small>{getCategoryLabel(item.category)}</small>
-            </div>
-          ))
-        )}
-      </div>
-    </aside>
-  );
-}
-
-type PlanStatProps = {
-  label: string;
-  value: string;
-  tone: 'income' | 'expense';
-};
-
-function PlanStat({ label, value, tone }: PlanStatProps) {
-  return (
-    <div className={`mplan-stat ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }
@@ -1191,96 +1079,6 @@ function FieldError({ id, show, message }: FieldErrorProps) {
   );
 }
 
-type PlanListPanelProps = {
-  title: string;
-  subtitle: string;
-  description: string;
-  tone: 'income' | 'expense';
-  emptyTitle: string;
-  items: MonthlyPlanItem[];
-  total: number;
-  completed: number;
-  progress: number;
-  isLoading: boolean;
-  onToggle: (item: MonthlyPlanItem) => void;
-  onEdit: (item: MonthlyPlanItem) => void;
-  onDelete: (item: MonthlyPlanItem) => void;
-};
-
-function PlanListPanel({
-  title,
-  subtitle,
-  description,
-  tone,
-  emptyTitle,
-  items,
-  total,
-  completed,
-  progress,
-  isLoading,
-  onToggle,
-  onEdit,
-  onDelete,
-}: PlanListPanelProps) {
-  return (
-    <article className={`mplan-list-card ${tone}`}>
-      <header className="mplan-list-header">
-        <div>
-          <span className="mplan-eyebrow">{subtitle}</span>
-          <h2>{title}</h2>
-          <p>{description}</p>
-        </div>
-
-        <div className={`mplan-list-orb ${tone}`} aria-hidden="true">
-          {tone === 'income' ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
-        </div>
-      </header>
-
-      <div className="mplan-list-summary">
-        <div>
-          <span>Total</span>
-          <strong>{formatMoney(total)}</strong>
-        </div>
-
-        <div>
-          <span>{tone === 'income' ? 'Recebido' : 'Pago'}</span>
-          <strong>{formatMoney(completed)}</strong>
-        </div>
-      </div>
-
-      <div className="mplan-progress-track" aria-label={`${progress.toFixed(0)}% confirmado`}>
-        <span className={tone} style={{ width: `${progress}%` }} />
-      </div>
-
-      {isLoading ? (
-        <div className="mplan-loading-list" aria-label="Carregando itens planejados">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className="mplan-loading-row" />
-          ))}
-        </div>
-      ) : items.length === 0 ? (
-        <div className="mplan-empty-state">
-          <Repeat2 size={22} />
-          <strong>{emptyTitle}</strong>
-          <p>Adicione um item acima para começar a controlar o mês.</p>
-        </div>
-      ) : (
-        <div className="mplan-row-list">
-          {items.map((item) => (
-            <PlanItemRow
-              key={item.id}
-              item={item}
-              onToggle={onToggle}
-              onEdit={onEdit}
-              onDelete={onDelete}
-            />
-          ))}
-        </div>
-      )}
-    </article>
-  );
-}
-
 type PlanItemRowProps = {
   item: MonthlyPlanItem;
   onToggle: (item: MonthlyPlanItem) => void;
@@ -1298,9 +1096,10 @@ function PlanItemRow({ item, onToggle, onEdit, onDelete }: PlanItemRowProps) {
         type="button"
         className={`mplan-check ${item.paid ? 'paid' : ''}`}
         onClick={() => onToggle(item)}
-        aria-label={item.paid ? 'Marcar como pendente' : 'Marcar como concluído'}
+        title={item.paid ? 'Marcar como pendente' : 'Confirmar item'}
+        aria-label={item.paid ? 'Marcar como pendente' : item.type === 'income' ? 'Confirmar recebimento' : 'Confirmar pagamento'}
       >
-        {item.paid ? <CheckCircle2 size={17} /> : <CalendarDays size={17} />}
+        {item.paid ? <CheckCircle2 size={17} /> : <Circle size={17} />}
       </button>
 
       <div className={`mplan-item-icon ${tone}`} aria-hidden="true">

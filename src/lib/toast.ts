@@ -4,16 +4,16 @@ const baseOptions = {
   duration: 3200,
 
   style: {
-    minWidth: '280px',
+    minWidth: 'min(280px, calc(100vw - 32px))',
     maxWidth: '420px',
     padding: '14px 16px',
-    borderRadius: '18px',
-    background: '#111827',
-    color: '#ffffff',
-    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: '10px',
+    background: 'var(--surface)',
+    color: 'var(--text)',
+    border: '1px solid var(--border)',
     boxShadow:
-      '0 20px 45px rgba(0,0,0,0.28)',
-    fontWeight: '700',
+      '0 4px 20px rgba(0,0,0,0.12)',
+    fontWeight: '500',
   },
 };
 

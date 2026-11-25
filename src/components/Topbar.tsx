@@ -17,7 +17,7 @@ type UserMetadata = {
 };
 
 const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': 'Dashboard Financeiro',
+  '/dashboard': 'Visão geral',
   '/monthly-plan': 'Planejamento Mensal',
   '/transactions': 'Transações',
   '/goals': 'Metas',
@@ -142,7 +142,7 @@ export default function Topbar({ onNewTransaction }: TopbarProps) {
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <h1 className="topbar-title">{pageTitle}</h1>
+        <span className="topbar-title">{pageTitle}</span>
       </div>
 
       <div className="topbar-right">
@@ -174,6 +174,7 @@ export default function Topbar({ onNewTransaction }: TopbarProps) {
           <button
             type="button"
             className="primary-btn"
+            aria-label="Nova transação"
             onClick={onNewTransaction}
           >
             <Plus size={16} />

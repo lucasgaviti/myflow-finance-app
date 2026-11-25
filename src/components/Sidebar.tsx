@@ -36,7 +36,7 @@ type UserMetadata = {
 
 const menuItems: MenuItem[] = [
   {
-    label: 'Dashboard',
+    label: 'Visão geral',
     icon: LayoutDashboard,
     path: '/dashboard',
   },
@@ -107,6 +107,7 @@ export default function Sidebar({
   onToggleCollapse,
   onCloseMobile,
 }: SidebarProps) {
+  const compact = collapsed && !mobileOpen;
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -156,12 +157,11 @@ export default function Sidebar({
     >
       <div>
         <div className="sidebar-top">
-          {!collapsed && (
-            <img
-              src={logo}
-              alt="MyFlow Finance"
-              className="sidebar-logo-image"
-            />
+          {!compact && (
+            <div className="sidebar-brand">
+              <span className="sidebar-brand-mark"><img src={logo} alt="" className="sidebar-logo-image" /></span>
+              <strong>MyFlow</strong>
+            </div>
           )}
 
           <button
@@ -182,13 +182,15 @@ export default function Sidebar({
             <NavLink
               key={path}
               to={path}
+              title={label}
+              aria-label={label}
               onClick={onCloseMobile}
               className={({ isActive }) =>
                 `sidebar-link ${isActive ? 'active' : ''}`
               }
             >
-              <Icon size={20} />
-              {!collapsed && <span>{label}</span>}
+              <Icon size={19} />
+              {!compact && <span>{label}</span>}
             </NavLink>
           ))}
         </nav>
@@ -227,7 +229,7 @@ export default function Sidebar({
         >
           <div className="user-avatar">{userInitials}</div>
 
-          {!collapsed && (
+          {!compact && (
             <div>
               <div className="user-name">{userName}</div>
               <div className="user-role">Conta pessoal</div>

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { ChangeEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -222,6 +223,9 @@ export default function Transactions() {
     updateTransaction,
   } = useTransactions();
 
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [monthFilter, setMonthFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<TypeFilter>('all');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -265,9 +269,14 @@ export default function Transactions() {
       const matchesCategory =
         filterCategory === 'all' ? true : transaction.category === filterCategory;
 
-      return matchesSearch && matchesType && matchesCategory;
+      const matchesMonth = monthFilter === 'all' || getTransactionDateKey(transaction.date).slice(0,7) === monthFilter;
+      return matchesSearch && matchesType && matchesCategory && matchesMonth;
     });
-  }, [transactions, search, filterType, filterCategory]);
+  }, [transactions, search, filterType, filterCategory, monthFilter]);
+
+  const monthOptions = useMemo(() => [...new Set([getTodayInputValue().slice(0,7), ...transactions.map(t => getTransactionDateKey(t.date).slice(0,7))])].sort().reverse(), [transactions]);
+  useEffect(() => { setSelectedIds([]); }, [search, filterType, filterCategory, monthFilter]);
+  useEffect(() => { if (location.state?.newTransaction) { setEditId(null); setTitle(''); setValue(''); setFormattedValue(''); setType('expense'); setCategory('Outros'); setDate(getTodayInputValue()); setShowModal(true); navigate(location.pathname, { replace: true, state: null }); } }, [location.state, location.pathname, navigate]);
 
   const filteredIncome = useMemo(
     () => getTotalByType(filteredTransactions, 'income'),
@@ -300,7 +309,7 @@ export default function Transactions() {
   );
 
   const hasActiveFilters =
-    Boolean(search.trim()) || filterType !== 'all' || filterCategory !== 'all';
+    Boolean(search.trim()) || filterType !== 'all' || filterCategory !== 'all' || monthFilter !== 'all';
 
   const allFilteredSelected =
     filteredTransactions.length > 0 &&
@@ -350,6 +359,7 @@ export default function Transactions() {
     setSearch('');
     setFilterType('all');
     setFilterCategory('all');
+    setMonthFilter('all');
   }
 
   function handleNewTransaction() {
@@ -387,7 +397,7 @@ export default function Transactions() {
         date: toStoredTransactionDate(date),
       };
 
-      await addTransaction(newTransaction);
+      if (!await addTransaction(newTransaction)) return;
 
       resetForm();
       setShowModal(false);
@@ -433,7 +443,7 @@ export default function Transactions() {
         date: toStoredTransactionDate(date),
       };
 
-      await updateTransaction(updatedTransaction);
+      if (!await updateTransaction(updatedTransaction)) return;
 
       setEditId(null);
       resetForm();
@@ -533,7 +543,7 @@ export default function Transactions() {
 
   return (
     <div className="transactions-premium-page">
-      <Topbar onNewTransaction={handleNewTransaction} />
+      <Topbar />
 
       <section className="transactions-page-header">
         <div>
@@ -612,7 +622,7 @@ export default function Transactions() {
 
             <input
               type="text"
-              placeholder="Buscar por descrição ou categoria..."
+              placeholder="Buscar transações..." aria-label="Buscar transações"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -620,7 +630,7 @@ export default function Transactions() {
 
           <div className="transactions-select-field">
             <select
-              value={filterType}
+              aria-label="Tipo de transação" value={filterType}
               onChange={(event) => setFilterType(event.target.value as TypeFilter)}
             >
               <option value="all">Todas</option>
@@ -633,7 +643,7 @@ export default function Transactions() {
 
           <div className="transactions-select-field">
             <select
-              value={filterCategory}
+              aria-label="Categoria" value={filterCategory}
               onChange={(event) => setFilterCategory(event.target.value)}
             >
               <option value="all">Todas categorias</option>
@@ -647,6 +657,7 @@ export default function Transactions() {
 
             <ChevronDown size={17} />
           </div>
+          <label className="transactions-select-field"><select aria-label="Mês das transações" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}><option value="all">Todos os meses</option>{monthOptions.map(month => <option key={month} value={month}>{new Intl.DateTimeFormat('pt-BR',{month:'short',year:'numeric'}).format(new Date(month+'-01T12:00:00'))}</option>)}</select><ChevronDown size={17}/></label>
         </div>
 
         {!isLoading && filteredTransactions.length > 0 && (
