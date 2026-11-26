@@ -9,7 +9,7 @@ type ProtectedRouteProps = {
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const location = useLocation();
-  const { user, isAuthLoading } = useAuth();
+  const { user, isAuthLoading, isRecovering } = useAuth();
 
   if (isAuthLoading) {
     return (
@@ -20,6 +20,8 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
       </div>
     );
   }
+
+  if (isRecovering) return <Navigate to="/reset-password" replace />;
 
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location }} />;
