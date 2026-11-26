@@ -1,0 +1,25 @@
+/* MyFlow 2.3.3 — styles scoped exclusively to authentication. */
+.mf-auth-page { padding: 24px 16px; }
+.mf-auth-card { width: min(100%, 440px); gap: 20px; padding: clamp(20px, 5vw, 32px); }
+.mf-auth-card .auth-logo img { object-fit: contain; flex-shrink: 0; }
+.mf-auth-brand { display:flex; align-items:center; justify-content:space-between; gap:10px; padding-bottom:16px; border-bottom:1px solid var(--border); }
+.mf-auth-brand .auth-logo strong { font-size: 18px; letter-spacing: -.035em; }
+.mf-auth-brand .auth-logo span { font-size: 12px; }
+.mf-auth-form { gap:14px; min-width:0; }
+.mf-auth-field { min-width:0; }
+.mf-auth-password { display:flex; align-items:center; position:relative; min-width:0; }
+.mf-auth-card .mf-auth-password input { padding-right:46px; }
+.mf-auth-password button { position:absolute; right:4px; width:38px; height:36px; display:grid; place-items:center; color:var(--muted); border-radius:6px; }
+.mf-auth-password button:hover { background:var(--hover); }
+.mf-auth-forgot { justify-self:end; padding:4px 0; font-size:13px; }
+.mf-auth-card .auth-submit { min-height:44px; white-space:normal; }
+.mf-auth-links { display:grid; gap:7px; text-align:center; }
+.mf-auth-links button { min-height:34px; }
+.mf-auth-notice { display:flex; align-items:flex-start; gap:9px; background:var(--accent-soft); color:var(--accent-text); padding:12px; border-radius:8px; font-size:13px; overflow-wrap:anywhere; }
+.mf-auth-card .auth-error { overflow-wrap:anywhere; font-size:13px; }
+.mf-auth-wait,.mf-auth-mismatch { font-size:12px; color:var(--warning); }
+.mf-auth-footer { border-top:1px solid var(--border); padding-top:14px; display:flex; align-items:center; justify-content:center; gap:7px; color:var(--muted); font-size:12px; }
+.mf-auth-spinner { animation: mf-auth-spin 1s linear infinite; }
+@keyframes mf-auth-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .mf-auth-spinner { animation:none; } }
+@media (max-width:360px) { .mf-auth-brand .auth-logo span { font-size:11px; } .mf-auth-card { padding:18px; } }
